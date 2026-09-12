@@ -1,6 +1,6 @@
 'use strict';
 // 面板的 Service Worker：离线时回退到最近一次成功抓到的数据。
-const CACHE = 'cls-dash-v2';
+const CACHE = 'cls-dash-v3';
 const SHELL = ['/', '/public/manifest.webmanifest', '/public/icon-192.png', '/public/icon-512.png'];
 const API = /^\/api\/(rows|pools|status)/;
 
@@ -43,20 +43,19 @@ self.addEventListener('fetch', function (e) {
     return;
   }
 
-  // 页面外壳：缓存优先，后台更新
+  // 页面外壳：网络优先（保证手机上看到的是最新版），
+  // 只有连不上（电脑休眠 / 断网）时才回退到缓存。
   if (u.pathname === '/' || u.pathname.indexOf('/public/') === 0) {
     e.respondWith(
-      caches.match(req).then(function (hit) {
-        const net = fetch(req).then(function (res) {
-          if (res && res.ok) {
-            const cp = res.clone();
-            caches.open(CACHE).then(function (c) { c.put(req, cp); });
-          }
-          return res;
-        }).catch(function () { return hit; });
-        return hit || net;
+      fetch(req).then(function (res) {
+        if (res && res.ok) {
+          const cp = res.clone();
+          caches.open(CACHE).then(function (c) { c.put(req, cp); });
+        }
+        return res;
+      }).catch(function () {
+        return caches.match(req).then(function (hit) { return hit || Response.error(); });
       })
     );
   }
 });
-

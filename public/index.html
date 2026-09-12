@@ -361,6 +361,13 @@ setInterval(loadStatus, 5000);
 // 注册 Service Worker：电脑休眠 / 断网时回退到最近一次抓到的数据
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', function () {
+    // 新的 Service Worker 接管时自动重载一次，避免手机上看到旧页面
+    var reloaded = false;
+    navigator.serviceWorker.addEventListener('controllerchange', function () {
+      if (reloaded) return;
+      reloaded = true;
+      location.reload();
+    });
     navigator.serviceWorker.register('/sw.js')
       .then(function (r) { console.log('[pwa] sw registered scope=' + r.scope); })
       .catch(function (e) { console.log('[pwa] sw failed: ' + ((e && e.message) || e)); });
