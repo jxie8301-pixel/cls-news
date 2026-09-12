@@ -13,7 +13,7 @@ const HEADERS = ['新闻发布时间', '涉及股票', '同篇其他股票', '�
   '股票代码', '文章链接'];
 
 // 网页表格用的列（把 9 个指标并成两列，便于阅读）
-const HTML_HEADERS = ['新闻发布时间', '涉及股票', '前缀类型', '新闻标题', '发布后表现', '当日行情'];
+const HTML_HEADERS = ['新闻发布时间', '涉及股票', '前缀类型', '新闻标题', '发布后表现', '当日行情', '换手率', '量较前日'];
 
 function pct(v) { return v === null || v === undefined ? '' : (v > 0 ? '+' : '') + Number(v).toFixed(2) + '%'; }
 function num(v, d) { return v === null || v === undefined ? '' : Number(v).toFixed(d === undefined ? 2 : d); }
@@ -30,10 +30,27 @@ function dayText(r) {
   if (r.open !== null && r.open !== undefined) p.push('开 ' + num(r.open));
   if (r.close !== null && r.close !== undefined) p.push('收 ' + num(r.close));
   if (r.changePct !== null && r.changePct !== undefined) p.push('日 ' + pct(r.changePct));
-  if (r.turnover !== null && r.turnover !== undefined) p.push('换手 ' + num(r.turnover) + '%');
-  if (r.volRatioPct !== null && r.volRatioPct !== undefined) p.push('量较前日 ' + pct(r.volRatioPct));
   return p.length ? p.join('  ') : '—';
 }
+
+// 换手率配色：10~15 绿、15~20 蓝、>20 红
+function turnLevel(v) {
+  if (v === null || v === undefined) return '';
+  if (v > 20) return 'v-red';
+  if (v >= 15) return 'v-blue';
+  if (v >= 10) return 'v-green';
+  return '';
+}
+// 量较前日配色：20~30 绿、30~40 蓝、>40 红
+function volLevel(v) {
+  if (v === null || v === undefined) return '';
+  if (v > 40) return 'v-red';
+  if (v >= 30) return 'v-blue';
+  if (v >= 20) return 'v-green';
+  return '';
+}
+function turnText(r) { return r.turnover === null || r.turnover === undefined ? '—' : num(r.turnover) + '%'; }
+function volText(r) { return r.volRatioPct === null || r.volRatioPct === undefined ? '—' : pct(r.volRatioPct); }
 const TEXT_SOURCE_LABEL = { share: '财联社正文（公开页）', detail: '财联社正文（接口）', brief: '栏目摘要', gated: '需订阅登录（点击标题查看全文）', none: '未取到' };
 
 function csvCell(v) {
@@ -62,7 +79,7 @@ const CSS = "body{font-family:'Microsoft YaHei',system-ui,sans-serif;margin:24px
 
 const BAR_CSS = ".bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 12px}.bar input[type=search]{flex:1 1 240px;min-width:0;font:inherit;font-size:13px;padding:7px 10px;border:1px solid #e5e5e5;border-radius:7px;background:#fff;color:#1c1c1e}.bar select{font:inherit;font-size:13px;padding:7px 10px;border:1px solid #e5e5e5;border-radius:7px;background:#fff;color:#1c1c1e;max-width:220px}.cnt{color:#888;font-size:12px;white-space:nowrap}@media (max-width:760px){.bar input[type=search]{flex:1 1 100%}.bar select{flex:1 1 40%}}";
 
-const EXTRA_CSS = "td.perf,td.day{font-variant-numeric:tabular-nums;font-size:12.5px;line-height:1.7;color:#3b4149}@media (max-width:760px){td[data-label=\"发布后表现\"]{order:3}td[data-label=\"当日行情\"]{order:4}td.txt{order:5}td[data-label=\"新闻发布时间\"]{order:6}td[data-label=\"前缀类型\"]{order:7}td.src{order:8}td[data-label=\"所属股票池\"]{order:9}}";
+const EXTRA_CSS = "td.perf,td.day{font-variant-numeric:tabular-nums;font-size:12.5px;line-height:1.7;color:#3b4149}td.turn,td.vol{font-variant-numeric:tabular-nums;font-size:12.5px;font-weight:600}.v-green{color:#0f9d58}.v-blue{color:#1a73e8}.v-red{color:#d93025}@media (max-width:760px){td[data-label=\"发布后表现\"]{order:3}td[data-label=\"当日行情\"]{order:4}td[data-label=\"换手率\"]{order:5}td[data-label=\"量较前日\"]{order:6}td[data-label=\"新闻发布时间\"]{order:7}td[data-label=\"前缀类型\"]{order:8}}";
 
 function toHtml(rows, meta) {
   // 只渲染数据行实际存在的列，避免表头多出两列空列
@@ -80,6 +97,8 @@ function toHtml(rows, meta) {
       '<td data-label=' + Q + '新闻标题' + Q + '><a href=' + Q + esc(r.url) + Q + ' target=' + Q + '_blank' + Q + '>' + esc(r.title) + '</a></td>' +
       '<td class=' + Q + 'perf' + Q + ' data-label=' + Q + '发布后表现' + Q + '>' + esc(afterText(r)) + '</td>' +
       '<td class=' + Q + 'day' + Q + ' data-label=' + Q + '当日行情' + Q + '>' + esc(dayText(r)) + '</td>' +
+      '<td class=' + Q + 'turn ' + turnLevel(r.turnover) + Q + ' data-label=' + Q + '换手率' + Q + '>' + esc(turnText(r)) + '</td>' +
+      '<td class=' + Q + 'vol ' + volLevel(r.volRatioPct) + Q + ' data-label=' + Q + '量较前日' + Q + '>' + esc(volText(r)) + '</td>' +
       '</tr>';
   }).join('\n');
   const toolbar = [
