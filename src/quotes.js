@@ -111,7 +111,7 @@ async function enrich(code, publishSec) {
     tradeDate: null, refMinute: null, refPx: null,
     m5: null, m30: null, m120: null,
     open: null, close: null, changePct: null,
-    volRatioPct: null, turnover: null, prevClose: null,
+    volRatioPct: null, turnover: null, prevClose: null, maxAbsChange: null,
   };
   try {
     const byDay = await minutes5d(code);
@@ -129,6 +129,13 @@ async function enrich(code, publishSec) {
       out.changePct = bar.change;
       out.turnover = bar.tr;
       out.prevClose = bar.preclose_px;
+      // 近 20 日最大单日绝对涨跌幅：用来判断该股实际适用哪一档涨跌幅限制
+      let maxAbs = null;
+      for (const b of bars.values()) {
+        const a = Math.abs(b.change || 0);
+        if (maxAbs === null || a > maxAbs) maxAbs = a;
+      }
+      out.maxAbsChange = maxAbs;
       const pk = prevDayKey(bars, dayKey);
       const pb = pk ? bars.get(pk) : null;
       if (pb && pb.business_amount) {

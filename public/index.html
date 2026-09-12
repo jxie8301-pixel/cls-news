@@ -36,6 +36,8 @@ td.turn,td.vol{font-variant-numeric:tabular-nums;font-size:12.5px;font-weight:60
 .v-green{color:#0f9d58}
 .v-blue{color:#1a73e8}
 .v-red{color:#d93025}
+.up-strong{color:#d93025;font-weight:600}
+.up-limit{color:#8b0000;font-weight:700}
 .stale-tag{color:var(--warn);margin-left:6px}
 @keyframes pulse{50%{opacity:.35}}
 .chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
@@ -180,11 +182,35 @@ function afterText(r) {
   if (p.length) return p.join('  ');
   return r.refPx === null || r.refPx === undefined ? '—' : '—（无分时）';
 }
-function dayText(r) {
+// 该股适用的涨跌幅限制：创业板/科创板 20%；主板 ST（按近20日实际波动校验）5%；其余 10%
+function inferLimit(code, name, maxAbs) {
+  var c = String(code || '');
+  if (/^sz30/.test(c) || /^sh688/.test(c)) return 20;
+  if (/ST/i.test(String(name || '')) && maxAbs !== null && maxAbs !== undefined && maxAbs <= 5.6) return 5;
+  return 10;
+}
+// 涨停 = 收盘价达到涨停价，且涨跌幅与本档限额偏离不超过 1.2 个百分点
+function isLimitUp(r) {
+  if (r.close === null || r.close === undefined) return false;
+  if (r.prevClose === null || r.prevClose === undefined || !r.prevClose) return false;
+  if (r.changePct === null || r.changePct === undefined) return false;
+  var nm = String(r.stockName || '');
+  if (/^[NC]/.test(nm)) return false;
+  var lim = inferLimit(r.stockCode, nm, r.maxAbsChange);
+  if (Math.abs(r.changePct - lim) > 1.2) return false;
+  var target = Math.round(r.prevClose * (1 + lim / 100) * 100) / 100;
+  return r.close >= target - 0.005;
+}
+function dayHtml(r) {
   var p = [];
   if (r.open !== null && r.open !== undefined) p.push('开 ' + num(r.open));
   if (r.close !== null && r.close !== undefined) p.push('收 ' + num(r.close));
-  if (r.changePct !== null && r.changePct !== undefined) p.push('日 ' + pct(r.changePct));
+  if (r.changePct !== null && r.changePct !== undefined) {
+    var txt = '日 ' + pct(r.changePct);
+    if (isLimitUp(r)) p.push('<span class="up-limit">' + txt + ' 涨停</span>');
+    else if (r.changePct > 5) p.push('<span class="up-strong">' + txt + '</span>');
+    else p.push(txt);
+  }
   return p.length ? p.join('  ') : '—';
 }
 function turnLevel(v) {
@@ -225,7 +251,7 @@ function render() {
       '<td class="pf-cell" data-label="栏目"><span class="pf">' + h(r.prefix) + '</span></td>' +
       '<td class="title"><a href="' + h(r.url) + '" target="_blank" rel="noreferrer">' + h(r.title) + '</a></td>' +
       '<td class="perf" data-label="发布后表现">' + h(afterText(r)) + '</td>' +
-      '<td class="day" data-label="当日行情">' + h(dayText(r)) + '</td>' +
+      '<td class="day" data-label="当日行情">' + dayHtml(r) + '</td>' +
       '<td class="turn ' + turnLevel(r.turnover) + '" data-label="换手率">' + h(turnText(r)) + '</td>' +
       '<td class="vol ' + volLevel(r.volRatioPct) + '" data-label="量较前日">' + h(volText(r)) + '</td>' +
       '</tr>';

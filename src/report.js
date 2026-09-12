@@ -25,11 +25,40 @@ function afterText(r) {
   if (p.length) return p.join('  ');
   return r.refPx === null || r.refPx === undefined ? '—' : '—（已收盘/数据不足）';
 }
-function dayText(r) {
+/**
+ * 该股适用的涨跌幅限制：
+ *   创业板(sz30) / 科创板(sh688) -> 20%
+ *   主板：名称含 ST 且近 20 日最大单日涨跌幅不超过 5.6% -> 5%，其余 10%
+ * 名称可能过期（已摘帽但仍显示 *ST），所以用实际行情校验。
+ */
+function inferLimit(code, name, maxAbs) {
+  const c = String(code || '');
+  if (/^sz30/.test(c) || /^sh688/.test(c)) return 20;
+  if (/ST/i.test(String(name || '')) && maxAbs !== null && maxAbs !== undefined && maxAbs <= 5.6) return 5;
+  return 10;
+}
+/** 涨停 = 收盘价达到该股涨停价，且涨跌幅与该档限额偏离不超过 1.2 个百分点 */
+function isLimitUp(r) {
+  if (r.close === null || r.close === undefined) return false;
+  if (r.prevClose === null || r.prevClose === undefined || !r.prevClose) return false;
+  if (r.changePct === null || r.changePct === undefined) return false;
+  const nm = String(r.stockName || '');
+  if (/^[NC]/.test(nm)) return false; // 新股上市初期无涨跌幅限制
+  const lim = inferLimit(r.stockCode, nm, r.maxAbsChange);
+  if (Math.abs(r.changePct - lim) > 1.2) return false;
+  const target = Math.round(r.prevClose * (1 + lim / 100) * 100) / 100;
+  return r.close >= target - 0.005;
+}
+function dayHtml(r) {
   const p = [];
   if (r.open !== null && r.open !== undefined) p.push('开 ' + num(r.open));
   if (r.close !== null && r.close !== undefined) p.push('收 ' + num(r.close));
-  if (r.changePct !== null && r.changePct !== undefined) p.push('日 ' + pct(r.changePct));
+  if (r.changePct !== null && r.changePct !== undefined) {
+    const txt = '日 ' + pct(r.changePct);
+    if (isLimitUp(r)) p.push('<span class="up-limit">' + txt + ' 涨停</span>');
+    else if (r.changePct > 5) p.push('<span class="up-strong">' + txt + '</span>');
+    else p.push(txt);
+  }
   return p.length ? p.join('  ') : '—';
 }
 
@@ -79,7 +108,7 @@ const CSS = "body{font-family:'Microsoft YaHei',system-ui,sans-serif;margin:24px
 
 const BAR_CSS = ".bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 12px}.bar input[type=search]{flex:1 1 240px;min-width:0;font:inherit;font-size:13px;padding:7px 10px;border:1px solid #e5e5e5;border-radius:7px;background:#fff;color:#1c1c1e}.bar select{font:inherit;font-size:13px;padding:7px 10px;border:1px solid #e5e5e5;border-radius:7px;background:#fff;color:#1c1c1e;max-width:220px}.cnt{color:#888;font-size:12px;white-space:nowrap}@media (max-width:760px){.bar input[type=search]{flex:1 1 100%}.bar select{flex:1 1 40%}}";
 
-const EXTRA_CSS = "td.perf,td.day{font-variant-numeric:tabular-nums;font-size:12.5px;line-height:1.7;color:#3b4149}td.turn,td.vol{font-variant-numeric:tabular-nums;font-size:12.5px;font-weight:600}.v-green{color:#0f9d58}.v-blue{color:#1a73e8}.v-red{color:#d93025}@media (max-width:760px){td[data-label=\"发布后表现\"]{order:3}td[data-label=\"当日行情\"]{order:4}td[data-label=\"换手率\"]{order:5}td[data-label=\"量较前日\"]{order:6}td[data-label=\"新闻发布时间\"]{order:7}td[data-label=\"前缀类型\"]{order:8}}";
+const EXTRA_CSS = "td.perf,td.day{font-variant-numeric:tabular-nums;font-size:12.5px;line-height:1.7;color:#3b4149}td.turn,td.vol{font-variant-numeric:tabular-nums;font-size:12.5px;font-weight:600}.v-green{color:#0f9d58}.v-blue{color:#1a73e8}.v-red{color:#d93025}.up-strong{color:#d93025;font-weight:600}.up-limit{color:#8b0000;font-weight:700}@media (max-width:760px){td[data-label=\"发布后表现\"]{order:3}td[data-label=\"当日行情\"]{order:4}td[data-label=\"换手率\"]{order:5}td[data-label=\"量较前日\"]{order:6}td[data-label=\"新闻发布时间\"]{order:7}td[data-label=\"前缀类型\"]{order:8}}";
 
 function toHtml(rows, meta) {
   // 只渲染数据行实际存在的列，避免表头多出两列空列
@@ -96,7 +125,7 @@ function toHtml(rows, meta) {
       '<td data-label=' + Q + '前缀类型' + Q + '><span class=' + Q + 'pf' + Q + '>' + esc(r.prefix) + '</span></td>' +
       '<td data-label=' + Q + '新闻标题' + Q + '><a href=' + Q + esc(r.url) + Q + ' target=' + Q + '_blank' + Q + '>' + esc(r.title) + '</a></td>' +
       '<td class=' + Q + 'perf' + Q + ' data-label=' + Q + '发布后表现' + Q + '>' + esc(afterText(r)) + '</td>' +
-      '<td class=' + Q + 'day' + Q + ' data-label=' + Q + '当日行情' + Q + '>' + esc(dayText(r)) + '</td>' +
+      '<td class=' + Q + 'day' + Q + ' data-label=' + Q + '当日行情' + Q + '>' + dayHtml(r) + '</td>' +
       '<td class=' + Q + 'turn ' + turnLevel(r.turnover) + Q + ' data-label=' + Q + '换手率' + Q + '>' + esc(turnText(r)) + '</td>' +
       '<td class=' + Q + 'vol ' + volLevel(r.volRatioPct) + Q + ' data-label=' + Q + '量较前日' + Q + '>' + esc(volText(r)) + '</td>' +
       '</tr>';

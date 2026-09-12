@@ -345,7 +345,7 @@ function prune(store, cutoff) {
 }
 
 /** 整理成按时间倒序的行；options: { days, pool, all } */
-const METRIC_KEYS = ['tradeDate', 'refMinute', 'refPx', 'm5', 'm30', 'm120', 'open', 'close', 'changePct', 'volRatioPct', 'turnover', 'prevClose'];
+const METRIC_KEYS = ['tradeDate', 'refMinute', 'refPx', 'm5', 'm30', 'm120', 'open', 'close', 'changePct', 'volRatioPct', 'turnover', 'prevClose', 'maxAbsChange'];
 
 function emptyMetrics() {
   const o = {};
