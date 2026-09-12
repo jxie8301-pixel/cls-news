@@ -389,6 +389,7 @@ function rows(store, options) {
     const list = (r.stocks || []);
     if (!perStock || !list.length) {
       out.push(Object.assign({ id: r.id, stock: base.stocks, stockCode: '', stockCodes: list.map(function (s) { return s.code; }) }, base, emptyMetrics()));
+      out.push(Object.assign({ id: r.id, stock: base.stocks, stockCode: '', others: '', stockCodes: list.map(function (s) { return s.code; }) }, base, emptyMetrics()));
       continue;
     }
     for (const s of list) {
@@ -401,6 +402,7 @@ function rows(store, options) {
         stockCode: s.code,
         stockCodes: [s.code],
         alsoIn: list.length - 1,
+        others: list.filter(function (x) { return x.code !== s.code; }).map(function (x) { return x.name + '(' + x.code + ')'; }).join('、'),
       }, base, m ? Object.assign(emptyMetrics(), m) : emptyMetrics()));
     }
   }

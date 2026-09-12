@@ -192,8 +192,8 @@ function render() {
   els.empty.style.display = list.length ? 'none' : 'block';
   var html = list.map(function (r) {
     var fresh = state.seen[r.id] === false ? ' class="fresh"' : '';
-    var parts = String(r.stocks || '').split('、').filter(Boolean);
-    var stkLabel = parts.length > 2 ? (parts.slice(0, 2).join('、') + ' 等 ' + parts.length + ' 只') : parts.join('、');
+    // 每一行就是一篇文章 x 一只股票，这里只显示该行对应的那一只
+    var stkLabel = r.stock || r.stocks || '';
     var body = h(r.text) || '<span class="mut">—</span>';
     var long = (r.text || '').length > 180;
     var bodyHtml = long ? '<div class="clamp">' + body + '</div><span class="more">展开全部</span>' : body;
