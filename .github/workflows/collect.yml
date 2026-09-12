@@ -30,7 +30,10 @@ jobs:
           node-version: '20'
 
       - name: 准备配置
-        run: cp config.example.json config.json
+        run: |
+          cp config.example.json config.json
+          mkdir -p data
+          curl -fsSL --retry 2 https://yunqingzou-bit.github.io/cls-news-dashboard/research.json -o data/research.json || true
 
       - name: 抓取（只跑沪深A股池，避免把个人自选股带进公开页面）
         env:
@@ -43,6 +46,7 @@ jobs:
           cp out/cls-news-latest.html _site/index.html
           cp out/cls-news-latest.csv  _site/news.csv
           cp out/cls-news-latest.json _site/news.json
+          cp data/research.json _site/research.json
           TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M %Z' > _site/updated.txt
           echo '--- 明细 ---'
           wc -c _site/index.html _site/news.csv

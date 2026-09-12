@@ -3,6 +3,7 @@
 const collectMod = require('./collect.js');
 const report = require('./report.js');
 const cls = require('./cls.js');
+const research = require('./research.js');
 
 function arg(name, fallback) {
   const i = process.argv.indexOf('--' + name);
@@ -75,6 +76,22 @@ function rangeLabel(days) {
 
   const store = collectMod.loadStore();
   const rows = withPoolNames(collectMod.rows(store, { days: days, pool: (only && only !== true) ? String(only) : 'all' }), names);
+  if (!process.argv.includes('--no-research')) {
+    let lastResearchLog = 0;
+    const rr = await research.enrichRows(rows, {
+      config: cfg,
+      onProgress: function (s) {
+        const now = Date.now();
+        if (now - lastResearchLog < 1500 && s.done < s.total) return;
+        lastResearchLog = now;
+        process.stdout.write('\r调研 ' + s.done + '/' + s.total + ' ｜ 缓存 ' + s.cached + ' ｜ 失败 ' + s.errors + '   ');
+      },
+    });
+    if (rr.refreshed) console.log('');
+    console.log('调研结论：股票 ' + rr.total + ' 只 ｜ 本轮更新 ' + rr.refreshed + ' ｜ 使用缓存 ' + rr.cached + ' ｜ 失败 ' + rr.errors);
+  } else {
+    research.attachRows(rows);
+  }
   const out = report.exportAll(rows, {
     title: '财联社 沪深A股 · 目标栏目新闻',
     range: rangeLabel(days),

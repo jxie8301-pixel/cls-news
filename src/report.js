@@ -10,10 +10,10 @@ const Q = String.fromCharCode(34);
 const HEADERS = ['新闻发布时间', '涉及股票', '同篇其他股票', '前缀类型', '新闻标题',
   '发布时价格', '发布后5min涨幅', '发布后30min涨幅', '发布后2h涨幅',
   '当天开盘价', '当天收盘价', '当天涨幅', '成交量较前日', '换手率', '交易日',
-  '股票代码', '文章链接'];
+  '股票代码', '文章链接', '调研结论'];
 
 // 网页表格用的列（把 9 个指标并成两列，便于阅读）
-const HTML_HEADERS = ['新闻发布时间', '涉及股票', '前缀类型', '新闻标题', '发布后表现', '当日行情', '换手率', '量较前日'];
+const HTML_HEADERS = ['新闻发布时间', '涉及股票', '前缀类型', '新闻标题', '发布后表现', '当日行情', '换手率', '量较前日', '调研结论'];
 
 function pct(v) { return v === null || v === undefined ? '' : (v > 0 ? '+' : '') + Number(v).toFixed(2) + '%'; }
 function num(v, d) { return v === null || v === undefined ? '' : Number(v).toFixed(d === undefined ? 2 : d); }
@@ -95,7 +95,7 @@ function toCsv(rows) {
       r.m5, r.m30, r.m120,
       r.open, r.close, r.changePct, r.volRatioPct, r.turnover,
       r.tradeDate || '',
-      r.stockCodes.join(' '), r.url].map(csvCell).join(','));
+      r.stockCodes.join(' '), r.url, r.researchConclusion || ''].map(csvCell).join(','));
   }
   return '\ufeff' + out.join('\r\n');
 }
@@ -108,7 +108,7 @@ const CSS = "body{font-family:'Microsoft YaHei',system-ui,sans-serif;margin:24px
 
 const BAR_CSS = ".bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 12px}.bar input[type=search]{flex:1 1 240px;min-width:0;font:inherit;font-size:13px;padding:7px 10px;border:1px solid #e5e5e5;border-radius:7px;background:#fff;color:#1c1c1e}.bar select{font:inherit;font-size:13px;padding:7px 10px;border:1px solid #e5e5e5;border-radius:7px;background:#fff;color:#1c1c1e;max-width:220px}.cnt{color:#888;font-size:12px;white-space:nowrap}@media (max-width:760px){.bar input[type=search]{flex:1 1 100%}.bar select{flex:1 1 40%}}";
 
-const EXTRA_CSS = "td.perf,td.day{font-variant-numeric:tabular-nums;font-size:12.5px;line-height:1.7;color:#3b4149}td.turn,td.vol{font-variant-numeric:tabular-nums;font-size:12.5px;font-weight:600}.v-green{color:#0f9d58}.v-blue{color:#1a73e8}.v-red{color:#d93025}.up-strong{color:#d93025;font-weight:600}.up-limit{color:#8b0000;font-weight:700}@media (max-width:760px){td[data-label=\"发布后表现\"]{order:3}td[data-label=\"当日行情\"]{order:4}td[data-label=\"换手率\"]{order:5}td[data-label=\"量较前日\"]{order:6}td[data-label=\"新闻发布时间\"]{order:7}td[data-label=\"前缀类型\"]{order:8}}";
+const EXTRA_CSS = "td.perf,td.day{font-variant-numeric:tabular-nums;font-size:12.5px;line-height:1.7;color:#3b4149}td.turn,td.vol{font-variant-numeric:tabular-nums;font-size:12.5px;font-weight:600}td.research{font-size:12.5px;line-height:1.7;color:#3b4149}.v-green{color:#0f9d58}.v-blue{color:#1a73e8}.v-red{color:#d93025}.up-strong{color:#d93025;font-weight:600}.up-limit{color:#8b0000;font-weight:700}@media (max-width:760px){td[data-label=\"发布后表现\"]{order:3}td[data-label=\"当日行情\"]{order:4}td[data-label=\"换手率\"]{order:5}td[data-label=\"量较前日\"]{order:6}td[data-label=\"调研结论\"]{order:7;padding-top:7px}td[data-label=\"新闻发布时间\"]{order:8}td[data-label=\"前缀类型\"]{order:9}}";
 
 function toHtml(rows, meta) {
   // 只渲染数据行实际存在的列，避免表头多出两列空列
@@ -128,6 +128,7 @@ function toHtml(rows, meta) {
       '<td class=' + Q + 'day' + Q + ' data-label=' + Q + '当日行情' + Q + '>' + dayHtml(r) + '</td>' +
       '<td class=' + Q + 'turn ' + turnLevel(r.turnover) + Q + ' data-label=' + Q + '换手率' + Q + '>' + esc(turnText(r)) + '</td>' +
       '<td class=' + Q + 'vol ' + volLevel(r.volRatioPct) + Q + ' data-label=' + Q + '量较前日' + Q + '>' + esc(volText(r)) + '</td>' +
+      '<td class=' + Q + 'research' + Q + ' data-label=' + Q + '调研结论' + Q + '>' + esc(r.researchConclusion || '—') + '</td>' +
       '</tr>';
   }).join('\n');
   const toolbar = [

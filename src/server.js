@@ -8,6 +8,7 @@ const path = require('node:path');
 const collectMod = require('./collect.js');
 const report = require('./report.js');
 const cls = require('./cls.js');
+const research = require('./research.js');
 
 const ROOT = collectMod.ROOT;
 const PUBLIC_DIR = path.join(ROOT, 'public');
@@ -85,6 +86,13 @@ async function refresh(reason) {
       r.poolNames = (r.pools || []).map(function (k) { return names[k] || k; });
       return r;
     });
+    const rr = await research.enrichRows(allRows, {
+      config: c,
+      onProgress: function (s) {
+        if (s.done === s.total || s.done % 25 === 0) console.log('  调研 ' + s.done + '/' + s.total + ' ｜ 缓存 ' + s.cached + ' ｜ 失败 ' + s.errors);
+      },
+    });
+    state.research = { total: rr.total, refreshed: rr.refreshed, cached: rr.cached, errors: rr.errors };
     const range = cls.fmtTime(nowSec - c.days * 86400).slice(0, 10) + ' ~ ' + cls.fmtTime(nowSec).slice(0, 10);
     report.exportAll(allRows, {
       title: '财联社 沪深A股 · 目标栏目新闻',
@@ -226,6 +234,7 @@ function handleRequest(req, res) {
       r.poolNames = (r.pools || []).map(function (k) { return names[k] || k; });
       return r;
     });
+    research.attachRows(rows);
     const nowSec = Math.floor(Date.now() / 1000);
     return json(res, 200, {
       rows: rows,
