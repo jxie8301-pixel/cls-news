@@ -11,5 +11,6 @@ config.local.json
 # 临时文件
 _*.log
 _*.err
+_*.ps1
 *.bak
 node_modules/
