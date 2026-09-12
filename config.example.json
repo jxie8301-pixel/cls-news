@@ -1,0 +1,26 @@
+{
+  "port": 8848,
+  "accessToken": "",
+  "refreshMinutes": 10,
+  "days": 7,
+  "concurrency": 8,
+  "requestDelayMs": 0,
+  "syncPoolsOnStart": true,
+  "constituentPageSize": 100,
+  "marketPool": { "enabled": true, "key": "all-a", "name": "沪深A股", "market": "all" },
+  "marketPageSize": 200,
+  "indexPools": [],
+  "prefixes": [
+    "盘中宝",
+    "风口研报",
+    "电报解读",
+    "财联社早知道",
+    "数据研选",
+    "研选",
+    "九点特供",
+    "公告全知道",
+    "解读龙虎榜",
+    "龙虎榜"
+  ],
+  "offlineSample": false
+}

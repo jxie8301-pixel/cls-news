@@ -1,0 +1,15 @@
+# 本地运行产物
+out/
+data/news.json
+data/pools/
+data/watchlist.json
+
+# 含口令的本地配置
+config.json
+config.local.json
+
+# 临时文件
+_*.log
+_*.err
+*.bak
+node_modules/

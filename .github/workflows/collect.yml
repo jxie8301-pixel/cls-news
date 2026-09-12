@@ -1,0 +1,64 @@
+name: 抓取并发布到 Pages
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+  schedule:
+    # 每 2 小时一次（UTC）；国内访问 github.io 若慢可改长
+    - cron: '23 */2 * * *'
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: 准备配置
+        run: cp config.example.json config.json
+
+      - name: 抓取（只跑沪深A股池，避免把个人自选股带进公开页面）
+        env:
+          TZ: Asia/Shanghai
+        run: node src/cli.js --pool all-a --days 7
+
+      - name: 组装发布目录
+        run: |
+          mkdir -p _site
+          cp out/cls-news-latest.html _site/index.html
+          cp out/cls-news-latest.csv  _site/news.csv
+          cp out/cls-news-latest.json _site/news.json
+          TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M %Z' > _site/updated.txt
+          echo '--- 明细 ---'
+          wc -c _site/index.html _site/news.csv
+
+      - uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

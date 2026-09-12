@@ -1,0 +1,16 @@
+{
+  "name": "cls-watchlist-news",
+  "version": "1.0.0",
+  "private": true,
+  "description": "财联社自选股 VIP 栏目新闻实时盯盘工具（零依赖）",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "collect": "node src/cli.js",
+    "export": "node src/cli.js --export",
+    "watchlist": "node src/watchlist.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
