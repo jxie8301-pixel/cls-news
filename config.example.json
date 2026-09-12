@@ -3,7 +3,7 @@
   "accessToken": "",
   "refreshMinutes": 10,
   "days": 7,
-  "concurrency": 8,
+  "concurrency": 12,
   "requestDelayMs": 0,
   "syncPoolsOnStart": true,
   "constituentPageSize": 100,

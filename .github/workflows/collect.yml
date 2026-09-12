@@ -5,8 +5,10 @@ on:
     branches: [main, master]
   workflow_dispatch:
   schedule:
-    # 每 2 小时一次（UTC）；国内访问 github.io 若慢可改长
-    - cron: '23 */2 * * *'
+    # 每 10 分钟一次（UTC）。GitHub 定时任务最小粒度是 5 分钟；
+    # 注意：schedule 在平台繁忙时会被延后，实际间隔常见 10~30 分钟。
+    # 刻意避开整点（:00）这个最拥挤的槽位。
+    - cron: '5,15,25,35,45,55 * * * *'
 
 permissions:
   contents: read

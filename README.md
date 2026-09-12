@@ -2,7 +2,7 @@
 
 > ### 📱 手机随时看：<https://yunqingzou-bit.github.io/cls-news-dashboard/>
 >
-> 云端每 2 小时自动抓取并发布的快照表格，带搜索框和栏目筛选，**不需要电脑开机**。
+ > 云端每 10 分钟自动抓取并发布的快照表格，带搜索框和栏目筛选，**不需要电脑开机**。
 >
 > ⚠️ 别和代码仓库搞混：`github.com/yunqingzou-bit/cls-news-dashboard` 是**源码**，
 > `yunqingzou-bit.github.io/cls-news-dashboard` 才是**网站**。
