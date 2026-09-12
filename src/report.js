@@ -7,13 +7,13 @@ const { ROOT } = require('./collect.js');
 const OUT_DIR = path.join(ROOT, 'out');
 const Q = String.fromCharCode(34);
 
-const HEADERS = ['新闻发布时间', '涉及股票', '同篇其他股票', '前缀类型', '新闻标题', '新闻正文',
+const HEADERS = ['新闻发布时间', '涉及股票', '同篇其他股票', '前缀类型', '新闻标题',
   '发布时价格', '发布后5min涨幅', '发布后30min涨幅', '发布后2h涨幅',
   '当天开盘价', '当天收盘价', '当天涨幅', '成交量较前日', '换手率', '交易日',
-  '正文来源', '所属股票池', '股票代码', '文章链接'];
+  '股票代码', '文章链接'];
 
 // 网页表格用的列（把 9 个指标并成两列，便于阅读）
-const HTML_HEADERS = ['新闻发布时间', '涉及股票', '前缀类型', '新闻标题', '发布后表现', '当日行情', '新闻正文', '正文来源', '所属股票池'];
+const HTML_HEADERS = ['新闻发布时间', '涉及股票', '前缀类型', '新闻标题', '发布后表现', '当日行情'];
 
 function pct(v) { return v === null || v === undefined ? '' : (v > 0 ? '+' : '') + Number(v).toFixed(2) + '%'; }
 function num(v, d) { return v === null || v === undefined ? '' : Number(v).toFixed(d === undefined ? 2 : d); }
@@ -44,13 +44,12 @@ function csvCell(v) {
 function toCsv(rows) {
   const out = [HEADERS.map(csvCell).join(',')];
   for (const r of rows) {
-    out.push([r.time, r.stock || r.stocks, r.others || '', r.prefix, r.title, r.text,
+    out.push([r.time, r.stock || r.stocks, r.others || '', r.prefix, r.title,
       r.refPx === null || r.refPx === undefined ? '' : num(r.refPx),
       r.m5, r.m30, r.m120,
       r.open, r.close, r.changePct, r.volRatioPct, r.turnover,
       r.tradeDate || '',
-      TEXT_SOURCE_LABEL[r.textSource] || r.textSource,
-      (r.poolNames || []).join(' / '), r.stockCodes.join(' '), r.url].map(csvCell).join(','));
+      r.stockCodes.join(' '), r.url].map(csvCell).join(','));
   }
   return '\ufeff' + out.join('\r\n');
 }
@@ -69,7 +68,6 @@ function toHtml(rows, meta) {
   // 只渲染数据行实际存在的列，避免表头多出两列空列
   const th = HTML_HEADERS.map(function (h) { return '<th>' + esc(h) + '</th>'; }).join('');
   const body = rows.map(function (r) {
-    const pools = (r.poolNames || []).map(function (p) { return '<span class=' + Q + 'pl' + Q + '>' + esc(p) + '</span>'; }).join('');
     return '<tr data-prefix=' + Q + esc(r.prefix) + Q + '>' +
       '<td class=' + Q + 't' + Q + ' data-label=' + Q + '新闻发布时间' + Q + '>' + esc(r.time) + '</td>' +
       '<td data-label=' + Q + '涉及股票' + Q + '>' + esc(r.stock || r.stocks) + '</td>' +
@@ -77,9 +75,6 @@ function toHtml(rows, meta) {
       '<td data-label=' + Q + '新闻标题' + Q + '><a href=' + Q + esc(r.url) + Q + ' target=' + Q + '_blank' + Q + '>' + esc(r.title) + '</a></td>' +
       '<td class=' + Q + 'perf' + Q + ' data-label=' + Q + '发布后表现' + Q + '>' + esc(afterText(r)) + '</td>' +
       '<td class=' + Q + 'day' + Q + ' data-label=' + Q + '当日行情' + Q + '>' + esc(dayText(r)) + '</td>' +
-      '<td class=' + Q + 'txt' + Q + ' data-label=' + Q + '新闻正文' + Q + '>' + esc(r.text) + '</td>' +
-      '<td class=' + Q + 'src' + Q + ' data-label=' + Q + '正文来源' + Q + '>' + esc(TEXT_SOURCE_LABEL[r.textSource] || r.textSource) + '</td>' +
-      '<td data-label=' + Q + '所属股票池' + Q + '>' + pools + '</td>' +
       '</tr>';
   }).join('\n');
   const toolbar = [
