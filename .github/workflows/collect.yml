@@ -6,9 +6,9 @@ on:
   workflow_dispatch:
   schedule:
     # 每 10 分钟一次（UTC）。GitHub 定时任务最小粒度是 5 分钟；
-    # 注意：schedule 在平台繁忙时会被延后，实际间隔常见 10~30 分钟。
-    # 刻意避开整点（:00）这个最拥挤的槽位。
-    - cron: '5,15,25,35,45,55 * * * *'
+    # 每 30 分钟一次（UTC）。刻意避开整点（:00）这个最拥挤的槽位。
+    # 注意：schedule 在平台繁忙时会被延后，实际间隔常见 30~60 分钟。
+    - cron: '7,37 * * * *'
 
 permissions:
   contents: read

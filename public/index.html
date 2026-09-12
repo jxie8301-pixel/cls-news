@@ -31,6 +31,7 @@ input[type=search]{width:190px}
 .dot.live{background:var(--ok)}
 .dot.busy{background:#f0a500;animation:pulse 1s infinite}
 .dot.stale{background:var(--warn)}
+td.perf,td.day{font-variant-numeric:tabular-nums;font-size:12.5px;line-height:1.7;color:#3b4149}
 .stale-tag{color:var(--warn);margin-left:6px}
 @keyframes pulse{50%{opacity:.35}}
 .chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
@@ -131,13 +132,15 @@ footer{color:var(--dim);font-size:12px;padding:0 20px 30px}
 <div class="wrap">
   <table>
     <colgroup>
-      <col style="width:11%"><col style="width:15%"><col style="width:8%"><col style="width:27%"><col style="width:29%"><col style="width:10%">
+      <col style="width:9%"><col style="width:13%"><col style="width:7%"><col style="width:21%"><col style="width:14%"><col style="width:16%"><col style="width:12%"><col style="width:8%">
     </colgroup>
     <thead><tr>
       <th>新闻发布时间</th>
       <th>涉及股票</th>
       <th>前缀类型</th>
       <th>新闻标题</th>
+      <th>发布后表现</th>
+      <th>当日行情</th>
       <th>新闻正文</th>
       <th>正文来源</th>
     </tr></thead>
@@ -159,6 +162,25 @@ var els = {
 };
 
 function h(s) { return String(s === null || s === undefined ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+function pct(v) { return v === null || v === undefined ? '' : (v > 0 ? '+' : '') + Number(v).toFixed(2) + '%'; }
+function num(v, d) { return v === null || v === undefined ? '' : Number(v).toFixed(d === undefined ? 2 : d); }
+function afterText(r) {
+  var p = [];
+  if (r.m5 !== null && r.m5 !== undefined) p.push('+5m ' + pct(r.m5));
+  if (r.m30 !== null && r.m30 !== undefined) p.push('+30m ' + pct(r.m30));
+  if (r.m120 !== null && r.m120 !== undefined) p.push('+2h ' + pct(r.m120));
+  if (p.length) return p.join('  ');
+  return r.refPx === null || r.refPx === undefined ? '—' : '—（无分时）';
+}
+function dayText(r) {
+  var p = [];
+  if (r.open !== null && r.open !== undefined) p.push('开 ' + num(r.open));
+  if (r.close !== null && r.close !== undefined) p.push('收 ' + num(r.close));
+  if (r.changePct !== null && r.changePct !== undefined) p.push('日 ' + pct(r.changePct));
+  if (r.turnover !== null && r.turnover !== undefined) p.push('换手 ' + num(r.turnover) + '%');
+  if (r.volRatioPct !== null && r.volRatioPct !== undefined) p.push('量较前日 ' + pct(r.volRatioPct));
+  return p.length ? p.join('  ') : '—';
+}
 
 function render() {
   var q = els.q.value.trim().toLowerCase();
@@ -180,6 +202,8 @@ function render() {
       '<td class="stk" data-label="涉及股票" title="' + h(r.stocks) + '">' + h(stkLabel) + '</td>' +
       '<td class="pf-cell" data-label="栏目"><span class="pf">' + h(r.prefix) + '</span></td>' +
       '<td class="title"><a href="' + h(r.url) + '" target="_blank" rel="noreferrer">' + h(r.title) + '</a></td>' +
+      '<td class="perf" data-label="发布后表现">' + h(afterText(r)) + '</td>' +
+      '<td class="day" data-label="当日行情">' + h(dayText(r)) + '</td>' +
       '<td class="body" data-label="正文">' + bodyHtml + '</td>' +
       '<td class="src" data-label="来源">' + h(SRC[r.textSource] || r.textSource) + '</td>' +
       '</tr>';

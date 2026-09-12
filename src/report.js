@@ -7,7 +7,33 @@ const { ROOT } = require('./collect.js');
 const OUT_DIR = path.join(ROOT, 'out');
 const Q = String.fromCharCode(34);
 
-const HEADERS = ['新闻发布时间', '涉及股票', '前缀类型', '新闻标题', '新闻正文', '正文来源', '所属股票池', '股票代码', '文章链接'];
+const HEADERS = ['新闻发布时间', '涉及股票', '前缀类型', '新闻标题', '新闻正文',
+  '发布时价格', '发布后5min涨幅', '发布后30min涨幅', '发布后2h涨幅',
+  '当天开盘价', '当天收盘价', '当天涨幅', '成交量较前日', '换手率', '交易日',
+  '正文来源', '所属股票池', '股票代码', '文章链接'];
+
+// 网页表格用的列（把 9 个指标并成两列，便于阅读）
+const HTML_HEADERS = ['新闻发布时间', '涉及股票', '前缀类型', '新闻标题', '发布后表现', '当日行情', '新闻正文', '正文来源', '所属股票池'];
+
+function pct(v) { return v === null || v === undefined ? '' : (v > 0 ? '+' : '') + Number(v).toFixed(2) + '%'; }
+function num(v, d) { return v === null || v === undefined ? '' : Number(v).toFixed(d === undefined ? 2 : d); }
+function afterText(r) {
+  const p = [];
+  if (r.m5 !== null && r.m5 !== undefined) p.push('+5m ' + pct(r.m5));
+  if (r.m30 !== null && r.m30 !== undefined) p.push('+30m ' + pct(r.m30));
+  if (r.m120 !== null && r.m120 !== undefined) p.push('+2h ' + pct(r.m120));
+  if (p.length) return p.join('  ');
+  return r.refPx === null || r.refPx === undefined ? '—' : '—（已收盘/数据不足）';
+}
+function dayText(r) {
+  const p = [];
+  if (r.open !== null && r.open !== undefined) p.push('开 ' + num(r.open));
+  if (r.close !== null && r.close !== undefined) p.push('收 ' + num(r.close));
+  if (r.changePct !== null && r.changePct !== undefined) p.push('日 ' + pct(r.changePct));
+  if (r.turnover !== null && r.turnover !== undefined) p.push('换手 ' + num(r.turnover) + '%');
+  if (r.volRatioPct !== null && r.volRatioPct !== undefined) p.push('量较前日 ' + pct(r.volRatioPct));
+  return p.length ? p.join('  ') : '—';
+}
 const TEXT_SOURCE_LABEL = { share: '财联社正文（公开页）', detail: '财联社正文（接口）', brief: '栏目摘要', gated: '需订阅登录（点击标题查看全文）', none: '未取到' };
 
 function csvCell(v) {
@@ -19,6 +45,10 @@ function toCsv(rows) {
   const out = [HEADERS.map(csvCell).join(',')];
   for (const r of rows) {
     out.push([r.time, r.stocks, r.prefix, r.title, r.text,
+      r.refPx === null || r.refPx === undefined ? '' : num(r.refPx),
+      r.m5, r.m30, r.m120,
+      r.open, r.close, r.changePct, r.volRatioPct, r.turnover,
+      r.tradeDate || '',
       TEXT_SOURCE_LABEL[r.textSource] || r.textSource,
       (r.poolNames || []).join(' / '), r.stockCodes.join(' '), r.url].map(csvCell).join(','));
   }
@@ -33,16 +63,21 @@ const CSS = "body{font-family:'Microsoft YaHei',system-ui,sans-serif;margin:24px
 
 const BAR_CSS = ".bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 12px}.bar input[type=search]{flex:1 1 240px;min-width:0;font:inherit;font-size:13px;padding:7px 10px;border:1px solid #e5e5e5;border-radius:7px;background:#fff;color:#1c1c1e}.bar select{font:inherit;font-size:13px;padding:7px 10px;border:1px solid #e5e5e5;border-radius:7px;background:#fff;color:#1c1c1e;max-width:220px}.cnt{color:#888;font-size:12px;white-space:nowrap}@media (max-width:760px){.bar input[type=search]{flex:1 1 100%}.bar select{flex:1 1 40%}}";
 
+const EXTRA_CSS = "td.perf,td.day{font-variant-numeric:tabular-nums;font-size:12.5px;line-height:1.7;color:#3b4149}@media (max-width:760px){td[data-label=\"发布后表现\"]{order:3}td[data-label=\"当日行情\"]{order:4}td.txt{order:5}td[data-label=\"新闻发布时间\"]{order:6}td[data-label=\"前缀类型\"]{order:7}td.src{order:8}td[data-label=\"所属股票池\"]{order:9}}";
+
 function toHtml(rows, meta) {
   // 只渲染数据行实际存在的列，避免表头多出两列空列
-  const th = HEADERS.slice(0, 7).map(function (h) { return '<th>' + esc(h) + '</th>'; }).join('');
+  const th = HTML_HEADERS.map(function (h) { return '<th>' + esc(h) + '</th>'; }).join('');
   const body = rows.map(function (r) {
     const pools = (r.poolNames || []).map(function (p) { return '<span class=' + Q + 'pl' + Q + '>' + esc(p) + '</span>'; }).join('');
     return '<tr data-prefix=' + Q + esc(r.prefix) + Q + '>' +
       '<td class=' + Q + 't' + Q + ' data-label=' + Q + '新闻发布时间' + Q + '>' + esc(r.time) + '</td>' +
       '<td data-label=' + Q + '涉及股票' + Q + '>' + esc(r.stocks) + '</td>' +
+      '<td data-label=' + Q + '涉及股票' + Q + '>' + esc(r.stock ? (r.stock + (r.alsoIn ? '（同篇另 ' + r.alsoIn + ' 只）' : '')) : r.stocks) + '</td>' +
       '<td data-label=' + Q + '前缀类型' + Q + '><span class=' + Q + 'pf' + Q + '>' + esc(r.prefix) + '</span></td>' +
       '<td data-label=' + Q + '新闻标题' + Q + '><a href=' + Q + esc(r.url) + Q + ' target=' + Q + '_blank' + Q + '>' + esc(r.title) + '</a></td>' +
+      '<td class=' + Q + 'perf' + Q + ' data-label=' + Q + '发布后表现' + Q + '>' + esc(afterText(r)) + '</td>' +
+      '<td class=' + Q + 'day' + Q + ' data-label=' + Q + '当日行情' + Q + '>' + esc(dayText(r)) + '</td>' +
       '<td class=' + Q + 'txt' + Q + ' data-label=' + Q + '新闻正文' + Q + '>' + esc(r.text) + '</td>' +
       '<td class=' + Q + 'src' + Q + ' data-label=' + Q + '正文来源' + Q + '>' + esc(TEXT_SOURCE_LABEL[r.textSource] || r.textSource) + '</td>' +
       '<td data-label=' + Q + '所属股票池' + Q + '>' + pools + '</td>' +
@@ -60,7 +95,7 @@ function toHtml(rows, meta) {
     '<!doctype html>',
     '<html lang=' + Q + 'zh-CN' + Q + '><head><meta charset=' + Q + 'utf-8' + Q + '>',
     '<title>财联社栏目新闻 ' + esc(meta.title || '') + '</title>',
-    '<style>' + CSS + BAR_CSS + '</style></head><body>',
+    '<style>' + CSS + BAR_CSS + EXTRA_CSS + '</style></head><body>',
     '<h1>' + esc(meta.title || '财联社自选股 · 目标栏目新闻') + '</h1>',
     '<div class=' + Q + 'meta' + Q + '>区间 ' + esc(meta.range) + ' ｜ 共 ' + rows.length + ' 条 ｜ 股票池 ' + esc(meta.poolLabel) + ' ｜ 生成于 ' + esc(meta.generatedAt) + '</div>',
     toolbar,

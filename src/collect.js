@@ -3,6 +3,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const cls = require('./cls.js');
+const quotes = require('./quotes.js');
 
 const ROOT = path.join(__dirname, '..');
 const DATA_DIR = path.join(ROOT, 'data');
@@ -247,6 +248,7 @@ async function collect(opts) {
   const stats = { stocks: targets.size, scanned: 0, listed: 0, prefixed: 0, matched: 0, newText: 0, errors: 0, pools: {} };
   for (const k of wantedKeys) stats.pools[k] = { name: poolNames[k] || k, matched: 0 };
   const errors = [];
+  const matchedIds = new Set();
 
   const items = Array.from(targets.values());
   await runPool(
@@ -265,6 +267,7 @@ async function collect(opts) {
           rec.matchedConfig = !!pf;
           if (!pf) continue;
           stats.matched++;
+          matchedIds.add(String(item.id));
           for (const k of stock.pools) stats.pools[k].matched++;
           if (cfg.fetchText !== false && !rec.text) {
             const t = await cls.fetchArticleText(item.id);
@@ -290,6 +293,30 @@ async function collect(opts) {
   );
 
   store.lastRun = { at: new Date().toISOString(), cutoff: cutoff, pools: wantedKeys, stats: stats, errors: errors.slice(0, 20) };
+
+  // 行情增强：给「命中文章 x 涉及股票」补上价格表现
+  if (cfg.enrichQuotes !== false && matchedIds.size) {
+    const recs = Array.from(matchedIds).map(function (id) { return store.articles[id]; }).filter(Boolean);
+    const codes = [];
+    for (const r of recs) for (const s of r.stocks || []) codes.push(s.code);
+    try {
+      const uniq = await quotes.prefetch(codes, cfg.quotesConcurrency || 6);
+      stats.quoteCodes = uniq;
+    } catch (e) {
+      stats.quoteError = String((e && e.message) || e);
+    }
+    let enriched = 0;
+    for (const r of recs) {
+      r.metrics = r.metrics || {};
+      for (const s of r.stocks || []) {
+        try {
+          r.metrics[s.code] = await quotes.enrich(s.code, r.ctime);
+          enriched++;
+        } catch (e) { /* 单只失败不影响整体 */ }
+      }
+    }
+    stats.enriched = enriched;
+  }
   prune(store, cutoff);
   prunePoolKeys(store);
   saveStore(store);
@@ -318,36 +345,66 @@ function prune(store, cutoff) {
 }
 
 /** 整理成按时间倒序的行；options: { days, pool, all } */
+const METRIC_KEYS = ['tradeDate', 'refMinute', 'refPx', 'm5', 'm30', 'm120', 'open', 'close', 'changePct', 'volRatioPct', 'turnover', 'prevClose'];
+
+function emptyMetrics() {
+  const o = {};
+  for (const k of METRIC_KEYS) o[k] = null;
+  return o;
+}
+
+/**
+ * 整理成行。默认「一篇文章 x 一只股票」一行（因为价格指标是逐股票的）。
+ * options: { days, pool, all, perStock=true }
+ */
 function rows(store, options) {
   options = options || {};
   const days = options.days || 7;
   const cutoff = Math.floor(Date.now() / 1000) - days * 86400;
   const pool = options.pool && options.pool !== 'all' ? options.pool : null;
-  return Object.values(store.articles)
+  const perStock = options.perStock !== false;
+  const out = [];
+  const arts = Object.values(store.articles)
     .filter(function (r) { return r.ctime >= cutoff; })
     .filter(function (r) {
       const pools = r.pools && r.pools.length ? r.pools : ['watchlist'];
       if (pool && pools.indexOf(pool) < 0) return false;
       return options.all ? true : r.matchedConfig !== false;
     })
-    .sort(function (a, b) { return b.ctime - a.ctime; })
-    .map(function (r) {
-      const pools = r.pools && r.pools.length ? r.pools : ['watchlist'];
-      return {
-        id: r.id,
-        time: cls.fmtTime(r.ctime),
-        ctime: r.ctime,
-        stocks: r.stocks.map(function (s) { return s.name + '(' + s.code + ')'; }).join('、'),
-        stockCodes: r.stocks.map(function (s) { return s.code; }),
-        pools: pools,
-        prefix: cls.titlePrefix(r.title) || r.column || '',
-        title: r.title,
-        text: r.text || r.brief || '',
-        textSource: r.textSource || (r.brief ? 'brief' : 'none'),
-        brief: r.brief || '',
-        url: r.url,
-      };
-    });
+    .sort(function (a, b) { return b.ctime - a.ctime; });
+
+  for (const r of arts) {
+    const pools = r.pools && r.pools.length ? r.pools : ['watchlist'];
+    const base = {
+      time: cls.fmtTime(r.ctime),
+      ctime: r.ctime,
+      stocks: (r.stocks || []).map(function (s) { return s.name + '(' + s.code + ')'; }).join('、'),
+      pools: pools,
+      prefix: cls.titlePrefix(r.title) || r.column || '',
+      title: r.title,
+      text: r.text || r.brief || '',
+      textSource: r.textSource || (r.brief ? 'brief' : 'none'),
+      url: r.url,
+    };
+    const list = (r.stocks || []);
+    if (!perStock || !list.length) {
+      out.push(Object.assign({ id: r.id, stock: base.stocks, stockCode: '', stockCodes: list.map(function (s) { return s.code; }) }, base, emptyMetrics()));
+      continue;
+    }
+    for (const s of list) {
+      const m = (r.metrics && r.metrics[s.code]) || null;
+      out.push(Object.assign({
+        id: r.id + '#' + s.code,
+        articleId: r.id,
+        stock: s.name + '(' + s.code + ')',
+        stockName: s.name,
+        stockCode: s.code,
+        stockCodes: [s.code],
+        alsoIn: list.length - 1,
+      }, base, m ? Object.assign(emptyMetrics(), m) : emptyMetrics()));
+    }
+  }
+  return out;
 }
 
 module.exports = {
