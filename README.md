@@ -1,5 +1,12 @@
 # 财联社 沪深A股 · 栏目新闻实时盯盘
 
+> ### 📱 手机随时看：<https://yunqingzou-bit.github.io/cls-news-dashboard/>
+>
+> 云端每 2 小时自动抓取并发布的快照表格，带搜索框和栏目筛选，**不需要电脑开机**。
+>
+> ⚠️ 别和代码仓库搞混：`github.com/yunqingzou-bit/cls-news-dashboard` 是**源码**，
+> `yunqingzou-bit.github.io/cls-news-dashboard` 才是**网站**。
+
 把**在上海证券交易所与深圳证券交易所上市的全部股票**（约 5200 只）里，命中《盘中宝》《风口研报》《电报解读》《财联社早知道》《数据研选》《九点特供》《公告全知道》《解读龙虎榜》等栏目前缀的个股新闻（默认回溯 7 天）抓下来，输出成**一张合并表格**，并提供一个打开就能实时看的本地面板。
 
 零依赖：只要有 Node.js 18+，不用 `npm install`。

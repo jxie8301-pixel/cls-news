@@ -157,9 +157,13 @@ function passAuth(req, res, u) {
   if (sameString(readCookie(req, 'cls_auth'), want)) return true;
   const k = u.searchParams.get('k');
   if (k && sameString(k, token)) {
+    // 带上口令认证后回到原本请求的地址（而不是一律跳首页），便于直接打开导出的文件
+    const keep = new URLSearchParams(u.search);
+    keep.delete('k');
+    const qs = keep.toString();
     res.writeHead(302, {
       'Set-Cookie': 'cls_auth=' + want + '; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000',
-      Location: '/',
+      Location: u.pathname + (qs ? '?' + qs : ''),
     });
     res.end();
     return false;
