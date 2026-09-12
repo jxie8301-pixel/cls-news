@@ -68,9 +68,14 @@ function toHtml(rows, meta) {
   // 只渲染数据行实际存在的列，避免表头多出两列空列
   const th = HTML_HEADERS.map(function (h) { return '<th>' + esc(h) + '</th>'; }).join('');
   const body = rows.map(function (r) {
+    const stockText = esc(r.stock || r.stocks);
+    const stockHtml = r.stockCode
+      ? '<a href=' + Q + 'https://www.cls.cn/stock?code=' + esc(r.stockCode) + Q +
+        ' target=' + Q + '_blank' + Q + ' rel=' + Q + 'noreferrer' + Q + '>' + stockText + '</a>'
+      : stockText;
     return '<tr data-prefix=' + Q + esc(r.prefix) + Q + '>' +
       '<td class=' + Q + 't' + Q + ' data-label=' + Q + '新闻发布时间' + Q + '>' + esc(r.time) + '</td>' +
-      '<td data-label=' + Q + '涉及股票' + Q + '>' + esc(r.stock || r.stocks) + '</td>' +
+      '<td data-label=' + Q + '涉及股票' + Q + '>' + stockHtml + '</td>' +
       '<td data-label=' + Q + '前缀类型' + Q + '><span class=' + Q + 'pf' + Q + '>' + esc(r.prefix) + '</span></td>' +
       '<td data-label=' + Q + '新闻标题' + Q + '><a href=' + Q + esc(r.url) + Q + ' target=' + Q + '_blank' + Q + '>' + esc(r.title) + '</a></td>' +
       '<td class=' + Q + 'perf' + Q + ' data-label=' + Q + '发布后表现' + Q + '>' + esc(afterText(r)) + '</td>' +

@@ -45,6 +45,8 @@ tbody tr:hover{background:#fcfcfd}
 tbody tr.fresh{background:#fffdf5}
 td.time{white-space:nowrap;color:#5b6472;font-variant-numeric:tabular-nums}
 td.stk{color:#3b4149}
+td.stk a{color:#1257a8;text-decoration:none}
+td.stk a:hover{text-decoration:underline}
 td.title{line-height:1.55}
 td.title a{color:#1257a8;text-decoration:none}
 td.title a:hover{text-decoration:underline}
@@ -192,9 +194,12 @@ function render() {
     var fresh = state.seen[r.id] === false ? ' class="fresh"' : '';
     // 每一行就是一篇文章 x 一只股票，这里只显示该行对应的那一只
     var stkLabel = r.stock || r.stocks || '';
+    var stkHtml = r.stockCode
+      ? '<a href="https://www.cls.cn/stock?code=' + h(r.stockCode) + '" target="_blank" rel="noreferrer">' + h(stkLabel) + '</a>'
+      : h(stkLabel);
     return '<tr' + fresh + ' data-id="' + h(r.id) + '">' +
       '<td class="time" data-label="发布时间">' + h(r.time) + '</td>' +
-      '<td class="stk" data-label="涉及股票" title="' + h(r.stocks) + '">' + h(stkLabel) + '</td>' +
+      '<td class="stk" data-label="涉及股票" title="' + h(r.stocks) + '">' + stkHtml + '</td>' +
       '<td class="pf-cell" data-label="栏目"><span class="pf">' + h(r.prefix) + '</span></td>' +
       '<td class="title"><a href="' + h(r.url) + '" target="_blank" rel="noreferrer">' + h(r.title) + '</a></td>' +
       '<td class="perf" data-label="发布后表现">' + h(afterText(r)) + '</td>' +
