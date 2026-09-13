@@ -2,7 +2,7 @@
 
 > ### 📱 手机随时看：<https://yunqingzou-bit.github.io/cls-news-dashboard/>
 >
- > 云端每 30 分钟自动抓取并发布的快照表格，带搜索框和栏目筛选，**不需要电脑开机**。
+> 云端自动抓取并发布的快照表格（交易日盘中每 10 分钟、交易日其他时段每 2 小时、非交易日每 6 小时），带搜索框和栏目筛选，**不需要电脑开机**。
 >
 > ⚠️ 别和代码仓库搞混：`github.com/yunqingzou-bit/cls-news-dashboard` 是**源码**，
 > `yunqingzou-bit.github.io/cls-news-dashboard` 才是**网站**。
@@ -19,7 +19,7 @@ node src/server.js
 
 然后在浏览器打开 <http://127.0.0.1:8848>。
 
-程序启动后会先同步股票池、再抓一次，之后每 10 分钟自动刷新（可在 `config.json` 里改）。页面自己每 30 秒拉一次数据，新出现的新闻会高亮。
+程序启动后会先同步股票池、再抓一次，之后按刷新节奏自动刷新：交易日 07:00-16:00 每 10 分钟、交易日其他时段每 2 小时、非交易日每 6 小时（交易日用上证指数当日日K核对，节假日自动按非交易日处理）。把 `config.json` 里的 `schedulePolicy` 设为 `false` 可以改回固定的 `refreshMinutes`。页面自己每 30 秒拉一次数据，新出现的新闻会高亮。
 
 ## 一次性抓取并导出表格
 ## 手机 / 外网访问（Tailscale）
@@ -72,7 +72,8 @@ node src/cli.js --no-sync      # 跳过股票池同步，直接用本地名单
 ```jsonc
 {
   "port": 8848,             // 本地端口
-  "refreshMinutes": 10,     // 自动刷新间隔（分钟）
+  "refreshMinutes": 10,     // 固定刷新间隔（分钟），仅当 schedulePolicy 为 false 时生效
+  "schedulePolicy": true,   // 按刷新节奏：交易日盘中 10 分钟 / 其他时段 2 小时 / 非交易日 6 小时
   "days": 7,                // 回溯天数
   "concurrency": 8,         // 并发抓多少只股票
   "requestDelayMs": 120,    // 每只股票之间的间隔，调大可降低被限流的概率
@@ -153,6 +154,7 @@ src/collect.js    抓取编排、并发、缓存（data/news.json）
 src/report.js     CSV / HTML / JSON 导出
 src/cli.js        命令行一次性抓取与导出
 src/server.js     本地服务 + 自动刷新调度
+src/schedule.js   刷新节奏判断（交易日 / 时段 → 间隔）
 public/index.html 实时面板（原生 JS，无构建）
 data/watchlist.json  自选股名单
 data/pools/*.json    股票池名单（all-a.json = 沪深A股全量）
@@ -178,7 +180,7 @@ out/                 导出结果
 - 大事件：近半年的重大合同、业绩、回购、重组、监管等公告，以及未来三个月的法定财报节点和事项跟踪点；
 - 增减持：近半年公告标题中可核验的增持、减持或不减持承诺，未检索到会明确写出。
 
-研究缓存位于 `data/research.json`，默认 24 小时刷新一次。GitHub Pages 会继承上一轮公开缓存，避免每 30 分钟对数百只股票重复请求。
+研究缓存位于 `data/research.json`，默认 24 小时刷新一次。GitHub Pages 会继承上一轮公开缓存，避免高频对数百只股票重复请求。
 ## 装成手机 App（PWA）
 
 面板本身就是个 PWA，不需要上架、不需要签名、不需要账号：

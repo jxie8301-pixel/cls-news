@@ -121,8 +121,9 @@ function armTimer(ms) {
 }
 
 /**
- * 下一次刷新时间：默认按刷新节奏策略（交易日盘中 30 分钟 / 交易日其他时段 2 小时 / 非交易日 6 小时，
- * 见 src/schedule.js）。把 config.schedulePolicy 设为 false 可退回固定的 refreshMinutes。
+ * 下一次刷新时间：按刷新节奏策略（交易日盘中 10 分钟 / 交易日其他时段 2 小时 / 非交易日 6 小时，
+ * 见 src/schedule.js），用「间隔 - 本轮抓取耗时」计算，让开始到开始的间距符合该档。
+ * 把 config.schedulePolicy 设为 false 可退回固定的 refreshMinutes。
  */
 function scheduleNext() {
   const c = cfg();
@@ -131,12 +132,15 @@ function scheduleNext() {
     armTimer(fixedMs);
     return;
   }
+  const parts = schedule.shanghaiParts(Date.now());
   schedule
-    .decide({ lastPublishedAt: state.lastRunAt ? Date.parse(state.lastRunAt) : null })
-    .then(function (d) {
-      const ms = d.run ? 5000 : Math.max(60000, d.remainingMs);
+    .detectTradingDay(parts)
+    .then(function (t) {
+      const policy = schedule.policyFor(parts, t.isTradingDay);
+      const spent = state.lastDurationMs || 0;
+      const ms = Math.max(60000, policy.intervalMinutes * 60000 - spent);
       armTimer(ms);
-      console.log('  下次刷新约 ' + Math.max(1, Math.round(ms / 60000)) + ' 分钟后 ｜ ' + d.label + ' ｜ ' + (d.isTradingDay ? '交易日' : '非交易日'));
+      console.log('  下次刷新约 ' + Math.max(1, Math.round(ms / 60000)) + ' 分钟后 ｜ ' + policy.label + ' ｜ ' + (t.isTradingDay ? '交易日' : '非交易日'));
     })
     .catch(function () { armTimer(fixedMs); });
 }
@@ -430,7 +434,9 @@ setTimeout(function () {
   console.log('  财联社自选股 · 栏目新闻实时盯盘');
   console.log('  ------------------------------------------------');
   console.log('  自选股 ' + wl.count + ' 只 ｜ 目标栏目 ' + cfg().prefixes.join('、'));
-  console.log('  回溯窗口 ' + cfg().days + ' 天 ｜ 刷新节奏 ' + (cfg().schedulePolicy === false ? '固定每 ' + cfg().refreshMinutes + ' 分钟' : '交易日盘中30分钟 · 交易日其他时段2小时 · 非交易日6小时'));
+  console.log('  回溯窗口 ' + cfg().days + ' 天 ｜ 刷新节奏 ' + (cfg().schedulePolicy === false
+    ? '固定每 ' + cfg().refreshMinutes + ' 分钟'
+    : '交易日盘中' + schedule.INTERVAL_MINUTES.tradingWindow + '分钟 · 交易日其他时段' + (schedule.INTERVAL_MINUTES.tradingOffHours / 60) + '小时 · 非交易日' + (schedule.INTERVAL_MINUTES.closed / 60) + '小时'));
   console.log('  已缓存文章 ' + Object.keys(store.articles || {}).length + ' 条');
   console.log('');
   console.log('  按 Ctrl+C 退出');

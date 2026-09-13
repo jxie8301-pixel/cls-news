@@ -3,7 +3,7 @@
  * 刷新节奏策略（云端定时任务与本地程序共用同一套判断）。
  *
  *   非交易日                -> 每 6 小时刷新一次
- *   交易日 07:00-16:00      -> 每 30 分钟刷新一次
+ *   交易日 07:00-16:00      -> 每 10 分钟刷新一次
  *   交易日 其他时段          -> 每 2 小时刷新一次
  *
  * 交易日怎么判断：
@@ -13,8 +13,11 @@
  *   3. 09:45 之前当天日K可能还没生成，此时无法判断，按“交易日”处理——宁可多刷，不可漏刷。
  *
  * 什么时候真正刷新：
- *   以“上一次发布/抓取的时间”为基准，间隔达到该时段要求的时长才刷新。
- *   这样即使平台延后触发、或某一轮被跳过，下一轮也能立刻补上，不会出现长时间不更新。
+ *   盘中每 10 分钟这一档由定时触发本身决定（cronDriven）：全市场抓取一次要 4 分钟左右，
+ *   若再按“距上次多久”判断，会被自己的抓取耗时误判成“还没到时间”而白白跳过一轮，
+ *   所以盘中只要触发就刷新，节奏＝触发节奏。
+ *   2 小时 / 6 小时这两档则以“上一次发布时间”为基准，达到要求时长才刷新，
+ *   这样即使平台延后触发或某一轮被跳过，下一轮也能立刻补上，不会长时间不更新。
  */
 
 const quotes = require('./quotes.js');
@@ -26,7 +29,7 @@ const PROBE_READY_MINUTE = 45;
 const GRACE_MINUTES = 10; // 抓取耗时 + 平台调度延迟的余量
 
 const INTERVAL_MINUTES = {
-  tradingWindow: 30, // 交易日 07:00-16:00
+  tradingWindow: 10, // 交易日 07:00-16:00
   tradingOffHours: 120, // 交易日其他时段
   closed: 360, // 非交易日
 };
@@ -93,7 +96,7 @@ function policyFor(parts, isTradingDay) {
     return { intervalMinutes: INTERVAL_MINUTES.closed, label: '非交易日（每 6 小时）' };
   }
   if (parts.hour >= 7 && parts.hour < 16) {
-    return { intervalMinutes: INTERVAL_MINUTES.tradingWindow, label: '交易时段 07:00-16:00（每 30 分钟）' };
+    return { intervalMinutes: INTERVAL_MINUTES.tradingWindow, cronDriven: true, label: '交易时段 07:00-16:00（每 ' + INTERVAL_MINUTES.tradingWindow + ' 分钟）' };
   }
   return { intervalMinutes: INTERVAL_MINUTES.tradingOffHours, label: '交易日非交易时段（每 2 小时）' };
 }
@@ -127,12 +130,14 @@ async function decide(opts) {
   }
   const policy = policyFor(parts, trading.isTradingDay);
   const last = opts.lastPublishedAt === undefined ? await fetchLastPublishedAt(opts.statusUrl) : opts.lastPublishedAt;
-  const thresholdMinutes = Math.max(1, policy.intervalMinutes - GRACE_MINUTES);
+  // 盘中档由触发驱动，不设等待门槛；其余档位留出抓取耗时与调度延迟的余量
+  const thresholdMinutes = policy.cronDriven ? policy.intervalMinutes : Math.max(1, policy.intervalMinutes - GRACE_MINUTES);
   const ageMinutes = last ? Math.floor((parts.epochMs - last) / 60000) : null;
   const remainingMs = last === null || last === undefined ? 0 : Math.max(0, thresholdMinutes * 60000 - (parts.epochMs - last));
-  const run = last === null || last === undefined || remainingMs === 0;
+  const run = policy.cronDriven === true || last === null || last === undefined || remainingMs === 0;
   return {
     run: run,
+    cronDriven: policy.cronDriven === true,
     parts: parts,
     isTradingDay: trading.isTradingDay,
     tradingReason: trading.how,
@@ -150,7 +155,11 @@ function describe(result) {
   const lines = [];
   lines.push('时间 ' + result.parts.text + ' ｜ ' + result.label);
   lines.push('交易日判定 ' + (result.isTradingDay ? '是' : '否') + '（' + result.tradingReason + '）');
-  lines.push('要求间隔 ' + result.intervalMinutes + ' 分钟（含 ' + (result.intervalMinutes - result.thresholdMinutes) + ' 分钟余量，实际达到 ' + result.thresholdMinutes + ' 分钟即刷新）');
+  if (result.cronDriven) {
+    lines.push('刷新方式 每次定时触发都执行（目标间隔 ' + result.intervalMinutes + ' 分钟）');
+  } else {
+    lines.push('要求间隔 ' + result.intervalMinutes + ' 分钟（含 ' + (result.intervalMinutes - result.thresholdMinutes) + ' 分钟余量，实际达到 ' + result.thresholdMinutes + ' 分钟即刷新）');
+  }
   if (result.lastPublishedAt) {
     const d = new Date(result.lastPublishedAt);
     lines.push('上次发布 ' + d.toISOString() + '（距今 ' + result.ageMinutes + ' 分钟）');
