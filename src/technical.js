@@ -389,7 +389,17 @@ async function refresh(rows, opts) {
   const cache = loadCache();
   const codes = new Map();
   for (const r of rows) if (r.stockCode && !codes.has(r.stockCode)) codes.set(r.stockCode, r.stockName || '');
-  const stale = Array.from(codes.keys()).filter(function (code) { return !isFresh(cache.stocks[code], hours); });
+  let stale = Array.from(codes.keys()).filter(function (code) { return !isFresh(cache.stocks[code], hours); });
+  // 每轮最多刷新多少只：云端用它可以避免一次抓几百只被数据源限流（0 = 不限）
+  const maxPerRun = Number(tcfg.maxPerRun || 0);
+  const deferred = maxPerRun > 0 && stale.length > maxPerRun ? stale.length - maxPerRun : 0;
+  if (deferred) {
+    stale = stale.slice().sort(function (a, b) {
+      const ta = cache.stocks[a] && cache.stocks[a].at ? new Date(cache.stocks[a].at).getTime() : 0;
+      const tb = cache.stocks[b] && cache.stocks[b].at ? new Date(cache.stocks[b].at).getTime() : 0;
+      return ta - tb;
+    }).slice(0, maxPerRun);
+  }
   let done = 0;
   let errors = 0;
   await runPool(stale, async function (code) {
@@ -409,7 +419,7 @@ async function refresh(rows, opts) {
   }, Math.max(1, concurrency));
   saveCache(cache);
   attachRows(rows, cache);
-  return { rows: rows, total: codes.size, refreshed: stale.length, cached: codes.size - stale.length, errors: errors };
+  return { rows: rows, total: codes.size, refreshed: stale.length, cached: codes.size - stale.length - deferred, errors: errors, deferred: deferred };
 }
 
 module.exports = {

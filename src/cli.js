@@ -110,7 +110,7 @@ function siteLinks() { return process.argv.includes('--site-links'); }
       },
     });
     if (tr.refreshed) console.log('');
-    console.log('技术面结论：股票 ' + tr.total + ' 只 ｜ 本轮更新 ' + tr.refreshed + ' ｜ 使用缓存 ' + tr.cached + ' ｜ 失败 ' + tr.errors);
+    console.log('技术面结论：股票 ' + tr.total + ' 只 ｜ 本轮更新 ' + tr.refreshed + ' ｜ 使用缓存 ' + tr.cached + ' ｜ 失败 ' + tr.errors + (tr.deferred ? ' ｜ 顺延下轮 ' + tr.deferred + ' 只' : ''));
   } else {
     technical.attachRows(rows);
   }
