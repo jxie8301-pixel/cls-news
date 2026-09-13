@@ -14,7 +14,8 @@ const HEADERS = ['新闻发布时间', '涉及股票', '同篇其他股票', '�
 
 // 网页表格用的列（把 9 个指标并成两列，便于阅读）
 const HTML_HEADERS = ['新闻发布时间', '涉及股票', '前缀类型', '新闻标题', '发布后表现', '当日行情', '换手率', '量较前日', '调研结论'];
-const HTML_COL_WIDTHS = [8, 10, 6, 15, 9, 9, 6, 6, 31];
+// 发布时间列要能放下一整行日期（否则会在“2026-09-12”中间断开），所以在窄屏适配下也有足够宽度
+const HTML_COL_WIDTHS = [11, 10, 6, 12, 9, 9, 6, 6, 31];
 
 function pct(v) { return v === null || v === undefined ? '' : (v > 0 ? '+' : '') + Number(v).toFixed(2) + '%'; }
 function num(v, d) { return v === null || v === undefined ? '' : Number(v).toFixed(d === undefined ? 2 : d); }
@@ -136,9 +137,12 @@ function researchHtml(value) {
   }).join('');
 }
 
-const CSS_BASE = "body{font-family:'Microsoft YaHei',system-ui,sans-serif;margin:24px;color:#1c1c1e;background:#fafafa}h1{font-size:20px;margin:0 0 6px}.meta{color:#666;font-size:13px;margin-bottom:16px}.meta a{white-space:nowrap}table{border-collapse:collapse;width:100%;background:#fff;font-size:13px;table-layout:fixed}th,td{border:1px solid #e5e5e5;padding:8px 10px;vertical-align:top;text-align:left;overflow-wrap:anywhere;word-break:break-word}th{background:#f2f3f5;position:sticky;top:0;z-index:2}td.t{white-space:normal;color:#555;font-variant-numeric:tabular-nums}td.txt{line-height:1.6;white-space:pre-wrap}td.src{white-space:nowrap;color:#888;font-size:12px}.pf{display:inline-block;background:#fff1e6;color:#c2410c;border:1px solid #ffd7bd;border-radius:3px;padding:1px 6px;white-space:nowrap}.pl{display:inline-block;background:#eef4fb;color:#1257a8;border:1px solid #cfe0f2;border-radius:3px;padding:1px 6px;white-space:nowrap;font-size:12px;margin:0 3px 2px 0}a{color:#1257a8;text-decoration:none}a:hover{text-decoration:underline}.tw{background:#fff}" ;
+const CSS_BASE = "body{font-family:'Microsoft YaHei',system-ui,sans-serif;margin:24px;color:#1c1c1e;background:#fafafa}h1{font-size:20px;margin:0 0 6px}.meta{color:#666;font-size:13px;margin-bottom:16px}.meta a{white-space:nowrap}.hint{color:#888;font-size:12.5px}table{border-collapse:collapse;width:100%;background:#fff;font-size:13px;table-layout:fixed}th,td{border:1px solid #e5e5e5;padding:8px 10px;vertical-align:top;text-align:left;overflow-wrap:anywhere;word-break:break-word}th{background:#f2f3f5;position:sticky;top:0;z-index:2}td.t{white-space:normal;color:#555;font-variant-numeric:tabular-nums}td.txt{line-height:1.6;white-space:pre-wrap}td.src{white-space:nowrap;color:#888;font-size:12px}.pf{display:inline-block;background:#fff1e6;color:#c2410c;border:1px solid #ffd7bd;border-radius:3px;padding:1px 6px;white-space:nowrap}.pl{display:inline-block;background:#eef4fb;color:#1257a8;border:1px solid #cfe0f2;border-radius:3px;padding:1px 6px;white-space:nowrap;font-size:12px;margin:0 3px 2px 0}a{color:#1257a8;text-decoration:none}a:hover{text-decoration:underline}.tw{background:#fff}" ;
 
 // 表格版：手机上仍然是表格，靠横向滚动保证列宽，避免挤压与文字重叠
+// 表格版：手机上不生成窄屏布局，而是把页面宽度声明为表格设计宽度（1080），
+// 由浏览器整页适配并按原生方式自由缩放（双指/双击），页面内部不再需要横向滚动。
+// 下面这段样式只在浏览器忽略该宽度声明时兜底（例如个别旧内核），保证仍可左右查看。
 const CSS_MOBILE_TABLE = "@media (max-width:760px){html,body{max-width:100%}body{margin:10px}h1{font-size:16px}.meta{font-size:12px;margin-bottom:10px}.tw{overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid #e5e5e5;border-radius:8px}table{width:1080px;min-width:1080px}th,td{font-size:12.5px;padding:6px 8px}th{position:static}td.t{font-size:12px}.research-item{margin-bottom:6px}}";
 
 // 卡片版：窄屏把每行折叠成一张卡片（手机上更好读，作为独立链接保留）
@@ -159,6 +163,10 @@ function toHtml(rows, meta, opts) {
   const links = (opts.links || []).map(function (l) {
     return ' <a href=' + Q + esc(l.href) + Q + '>' + esc(l.label) + '</a>';
   }).join('');
+  // 表格版把页面宽度声明为表格设计宽度：手机浏览器会整页缩放到屏幕并允许自由缩放（双指/双击），
+  // 桌面浏览器会忽略 viewport 声明，因此桌面依旧是满宽表格。
+  const viewportContent = layout === 'cards' ? 'width=device-width, initial-scale=1' : 'width=1080';
+  const hintHtml = layout === 'cards' ? '' : '<div class=' + Q + 'hint' + Q + ' id=' + Q + 'hint' + Q + ' style=' + Q + 'display:none' + Q + '></div>';
   // 只渲染数据行实际存在的列，避免表头多出两列空列
   const th = HTML_HEADERS.map(function (h) { return '<th>' + esc(h) + '</th>'; }).join('');
   const colgroup = '<colgroup>' + HTML_COL_WIDTHS.map(function (w) { return '<col style=' + Q + 'width:' + w + '%' + Q + '>'; }).join('') + '</colgroup>';
@@ -188,14 +196,15 @@ function toHtml(rows, meta, opts) {
     '<span class=' + Q + 'cnt' + Q + ' id=' + Q + 'cnt' + Q + '></span>',
     '</div>',
   ].join('');
-  const script = '<script>' + "(function(){\n  var rows = [].slice.call(document.querySelectorAll('tbody tr'));\n  var q = document.getElementById('q');\n  var pf = document.getElementById('pf');\n  var cnt = document.getElementById('cnt');\n  if (!rows.length || !q || !pf) return;\n  var initialQuery = new URLSearchParams(location.search).get('q');\n  if (initialQuery) q.value = initialQuery;\n  var counts = {};\n  rows.forEach(function(tr){ var p = tr.getAttribute('data-prefix') || ''; counts[p] = (counts[p] || 0) + 1; });\n  Object.keys(counts).sort(function(a,b){ return counts[b] - counts[a]; }).forEach(function(p){\n    var o = document.createElement('option');\n    o.value = p; o.textContent = p + '（' + counts[p] + '）';\n    pf.appendChild(o);\n  });\n  var cache = rows.map(function(tr){ return (tr.textContent || '').toLowerCase(); });\n  function apply(){\n    var kw = q.value.trim().toLowerCase();\n    var p = pf.value;\n    var n = 0;\n    for (var i = 0; i < rows.length; i++) {\n      var ok = (!p || rows[i].getAttribute('data-prefix') === p) && (!kw || cache[i].indexOf(kw) > -1);\n      rows[i].style.display = ok ? '' : 'none';\n      if (ok) n++;\n    }\n    cnt.textContent = '显示 ' + n + ' / ' + rows.length + ' 条';\n  }\n  q.addEventListener('input', apply);\n  pf.addEventListener('change', apply);\n  apply();\n})();" + '<' + '/script>';
+  const script = '<script>' + "(function(){\n  var rows = [].slice.call(document.querySelectorAll('tbody tr'));\n  var q = document.getElementById('q');\n  var pf = document.getElementById('pf');\n  var cnt = document.getElementById('cnt');\n  var hint = document.getElementById('hint');\n  if (hint && screen && screen.width && screen.width <= 760) {\n    hint.textContent = '已按屏幕整页适配：双指缩放或双击可放大查看细节';\n    hint.style.display = 'block';\n  }\n  if (!rows.length || !q || !pf) return;\n  var initialQuery = new URLSearchParams(location.search).get('q');\n  if (initialQuery) q.value = initialQuery;\n  var counts = {};\n  rows.forEach(function(tr){ var p = tr.getAttribute('data-prefix') || ''; counts[p] = (counts[p] || 0) + 1; });\n  Object.keys(counts).sort(function(a,b){ return counts[b] - counts[a]; }).forEach(function(p){\n    var o = document.createElement('option');\n    o.value = p; o.textContent = p + '（' + counts[p] + '）';\n    pf.appendChild(o);\n  });\n  var cache = rows.map(function(tr){ return (tr.textContent || '').toLowerCase(); });\n  function apply(){\n    var kw = q.value.trim().toLowerCase();\n    var p = pf.value;\n    var n = 0;\n    for (var i = 0; i < rows.length; i++) {\n      var ok = (!p || rows[i].getAttribute('data-prefix') === p) && (!kw || cache[i].indexOf(kw) > -1);\n      rows[i].style.display = ok ? '' : 'none';\n      if (ok) n++;\n    }\n    cnt.textContent = '显示 ' + n + ' / ' + rows.length + ' 条';\n  }\n  q.addEventListener('input', apply);\n  pf.addEventListener('change', apply);\n  apply();\n})();" + '<' + '/script>';
   return [
     '<!doctype html>',
-    '<html lang=' + Q + 'zh-CN' + Q + '><head><meta charset=' + Q + 'utf-8' + Q + '><meta name=' + Q + 'viewport' + Q + ' content=' + Q + 'width=device-width, initial-scale=1' + Q + '>',
+    '<html lang=' + Q + 'zh-CN' + Q + '><head><meta charset=' + Q + 'utf-8' + Q + '><meta name=' + Q + 'viewport' + Q + ' content=' + Q + viewportContent + Q + '>',
     '<title>财联社栏目新闻 ' + esc(meta.title || '') + '</title>',
     '<style>' + CSS_BASE + mobileCss + BAR_CSS + EXTRA_CSS + '</style></head><body>',
     '<h1>' + esc(meta.title || '财联社自选股 · 目标栏目新闻') + '</h1>',
     '<div class=' + Q + 'meta' + Q + '>区间 ' + esc(meta.range) + ' ｜ 共 ' + rows.length + ' 条 ｜ 股票池 ' + esc(meta.poolLabel) + ' ｜ 生成于 ' + esc(meta.generatedAt) + links + '</div>',
+    hintHtml,
     toolbar,
     '<div class=' + Q + 'tw' + Q + '><table>' + colgroup + '<thead><tr>' + th + '</tr></thead><tbody>',
     body,

@@ -2,7 +2,8 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- 表格设计宽度 1080：手机浏览器整页适配并允许自由缩放（双指/双击）；桌面浏览器忽略该声明，仍为满宽表格 -->
+<meta name="viewport" content="width=1080">
 <link rel="manifest" href="/manifest.webmanifest">
 <meta name="theme-color" content="#c2410c">
 <meta name="mobile-web-app-capable" content="yes">
@@ -138,7 +139,7 @@ footer{color:var(--dim);font-size:12px;padding:0 20px 30px}
 <div class="wrap">
   <table>
     <colgroup>
-      <col style="width:8%"><col style="width:10%"><col style="width:6%"><col style="width:15%"><col style="width:9%"><col style="width:9%"><col style="width:6%"><col style="width:6%"><col style="width:31%">
+      <col style="width:11%"><col style="width:10%"><col style="width:6%"><col style="width:12%"><col style="width:9%"><col style="width:9%"><col style="width:6%"><col style="width:6%"><col style="width:31%">
     </colgroup>
     <thead><tr>
       <th>新闻发布时间</th>
@@ -319,6 +320,7 @@ async function load(initial) {
   els.sub.innerHTML = '<span class="dot ' + (stale ? 'stale' : 'live') + '"></span>数据更新于 ' + h(storeAge) + ' ｜ ' + h(poolLabel) + ' ｜ 当前条件 ' + d.rows.length + ' 条' +
     (stale ? '<span class="stale-tag">可能已离线（显示最近一次缓存）</span>' : '');
   els.foot.textContent = '数据窗口 ' + d.windowFrom + ' ~ ' + d.windowTo + ' ｜ 来源：财联社 cls.cn（www.cls.cn /es/quotes/articles）。仅供研究参考，不构成投资建议。';
+  if (screen.width <= 760) els.foot.textContent += ' 双指缩放或双击可放大查看细节。';
 }
 
 function renderPoolOptions(pools) {
