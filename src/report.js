@@ -14,6 +14,7 @@ const HEADERS = ['新闻发布时间', '涉及股票', '同篇其他股票', '�
 
 // 网页表格用的列（把 9 个指标并成两列，便于阅读）
 const HTML_HEADERS = ['新闻发布时间', '涉及股票', '前缀类型', '新闻标题', '发布后表现', '当日行情', '换手率', '量较前日', '调研结论'];
+const HTML_COL_WIDTHS = [8, 10, 6, 15, 9, 9, 6, 6, 31];
 
 function pct(v) { return v === null || v === undefined ? '' : (v > 0 ? '+' : '') + Number(v).toFixed(2) + '%'; }
 function num(v, d) { return v === null || v === undefined ? '' : Number(v).toFixed(d === undefined ? 2 : d); }
@@ -104,7 +105,7 @@ function esc(v) {
   return String(v === null || v === undefined ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-const CSS = "body{font-family:'Microsoft YaHei',system-ui,sans-serif;margin:24px;color:#1c1c1e;background:#fafafa}h1{font-size:20px;margin:0 0 6px}.meta{color:#666;font-size:13px;margin-bottom:16px}table{border-collapse:collapse;width:100%;background:#fff;font-size:13px;table-layout:fixed}th,td{border:1px solid #e5e5e5;padding:8px 10px;vertical-align:top;text-align:left;overflow-wrap:anywhere;word-break:break-word}th{background:#f2f3f5;position:sticky;top:0;z-index:2}td.t{white-space:nowrap;color:#555}td.txt{line-height:1.6;white-space:pre-wrap}td.src{white-space:nowrap;color:#888;font-size:12px}.pf{display:inline-block;background:#fff1e6;color:#c2410c;border:1px solid #ffd7bd;border-radius:3px;padding:1px 6px;white-space:nowrap}.pl{display:inline-block;background:#eef4fb;color:#1257a8;border:1px solid #cfe0f2;border-radius:3px;padding:1px 6px;white-space:nowrap;font-size:12px;margin:0 3px 2px 0}a{color:#1257a8;text-decoration:none}a:hover{text-decoration:underline}@media (max-width:760px){body{margin:10px}h1{font-size:16px}.meta{font-size:12px;margin-bottom:10px}table{border:0;background:transparent;table-layout:auto}thead{display:none}tbody tr{display:flex;flex-direction:column;background:#fff;border:1px solid #e5e5e5;border-radius:10px;padding:10px 12px;margin-bottom:10px}tbody td{display:block;border:0;padding:2px 0}tbody td::before{content:attr(data-label);display:block;color:#888;font-size:11.5px;line-height:1.5}td[data-label=\"新闻标题\"]{order:1;font-size:15px;font-weight:600;padding-bottom:6px}td[data-label=\"新闻标题\"]::before{display:none}td[data-label=\"涉及股票\"]{order:2}td.txt{order:3;padding-top:6px;white-space:pre-wrap}td[data-label=\"新闻发布时间\"]{order:4;padding-top:6px;white-space:normal}td[data-label=\"前缀类型\"]{order:5}td.src{order:6;white-space:normal}td[data-label=\"所属股票池\"]{order:7}}" ;
+const CSS = "body{font-family:'Microsoft YaHei',system-ui,sans-serif;margin:24px;color:#1c1c1e;background:#fafafa}h1{font-size:20px;margin:0 0 6px}.meta{color:#666;font-size:13px;margin-bottom:16px}table{border-collapse:collapse;width:100%;background:#fff;font-size:13px;table-layout:fixed}th,td{border:1px solid #e5e5e5;padding:8px 10px;vertical-align:top;text-align:left;overflow-wrap:anywhere;word-break:break-word}th{background:#f2f3f5;position:sticky;top:0;z-index:2}td.t{white-space:nowrap;color:#555}td.txt{line-height:1.6;white-space:pre-wrap}td.src{white-space:nowrap;color:#888;font-size:12px}.pf{display:inline-block;background:#fff1e6;color:#c2410c;border:1px solid #ffd7bd;border-radius:3px;padding:1px 6px;white-space:nowrap}.pl{display:inline-block;background:#eef4fb;color:#1257a8;border:1px solid #cfe0f2;border-radius:3px;padding:1px 6px;white-space:nowrap;font-size:12px;margin:0 3px 2px 0}a{color:#1257a8;text-decoration:none}a:hover{text-decoration:underline}@media (max-width:760px){body{margin:10px}h1{font-size:16px}.meta{font-size:12px;margin-bottom:10px}table{border:0;background:transparent;table-layout:auto}colgroup{display:none}thead{display:none}tbody tr{display:flex;flex-direction:column;background:#fff;border:1px solid #e5e5e5;border-radius:10px;padding:10px 12px;margin-bottom:10px}tbody td{display:block;border:0;padding:2px 0}tbody td::before{content:attr(data-label);display:block;color:#888;font-size:11.5px;line-height:1.5}td[data-label=\"新闻标题\"]{order:1;font-size:15px;font-weight:600;padding-bottom:6px}td[data-label=\"新闻标题\"]::before{display:none}td[data-label=\"涉及股票\"]{order:2}td.txt{order:3;padding-top:6px;white-space:pre-wrap}td[data-label=\"新闻发布时间\"]{order:4;padding-top:6px;white-space:normal}td[data-label=\"前缀类型\"]{order:5}td.src{order:6;white-space:normal}td[data-label=\"所属股票池\"]{order:7}}" ;
 
 const BAR_CSS = ".bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 12px}.bar input[type=search]{flex:1 1 240px;min-width:0;font:inherit;font-size:13px;padding:7px 10px;border:1px solid #e5e5e5;border-radius:7px;background:#fff;color:#1c1c1e}.bar select{font:inherit;font-size:13px;padding:7px 10px;border:1px solid #e5e5e5;border-radius:7px;background:#fff;color:#1c1c1e;max-width:220px}.cnt{color:#888;font-size:12px;white-space:nowrap}@media (max-width:760px){.bar input[type=search]{flex:1 1 100%}.bar select{flex:1 1 40%}}";
 
@@ -113,6 +114,7 @@ const EXTRA_CSS = "td.perf,td.day{font-variant-numeric:tabular-nums;font-size:12
 function toHtml(rows, meta) {
   // 只渲染数据行实际存在的列，避免表头多出两列空列
   const th = HTML_HEADERS.map(function (h) { return '<th>' + esc(h) + '</th>'; }).join('');
+  const colgroup = '<colgroup>' + HTML_COL_WIDTHS.map(function (w) { return '<col style=' + Q + 'width:' + w + '%' + Q + '>'; }).join('') + '</colgroup>';
   const body = rows.map(function (r) {
     const stockText = esc(r.stock || r.stocks);
     const stockHtml = r.stockCode
@@ -148,7 +150,7 @@ function toHtml(rows, meta) {
     '<h1>' + esc(meta.title || '财联社自选股 · 目标栏目新闻') + '</h1>',
     '<div class=' + Q + 'meta' + Q + '>区间 ' + esc(meta.range) + ' ｜ 共 ' + rows.length + ' 条 ｜ 股票池 ' + esc(meta.poolLabel) + ' ｜ 生成于 ' + esc(meta.generatedAt) + '</div>',
     toolbar,
-    '<table><thead><tr>' + th + '</tr></thead><tbody>',
+    '<table>' + colgroup + '<thead><tr>' + th + '</tr></thead><tbody>',
     body,
     '</tbody></table>',
     script,
