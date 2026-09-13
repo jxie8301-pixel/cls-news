@@ -76,9 +76,18 @@ jobs:
           TZ: Asia/Shanghai
         run: node src/cli.js --pool all-a --days 7 --site-links
 
+      - name: Stockbee 动量爆发研究（近三个月 + T+1 ~ T+5 前瞻收益）
+        env:
+          TZ: Asia/Shanghai
+        run: |
+          mkdir -p out
+          # 继承上一次发布的数据：若已覆盖最新交易日，脚本会跳过抓取、只重出页面，避免每轮都全市场重扫
+          curl -fsSL --retry 2 https://yunqingzou-bit.github.io/cls-news-dashboard/stockbee.json -o out/stockbee.json || true
+          node src/stockbee.js --months 3 --pool all-a --skip-if-fresh --no-cache
+
       - name: 组装发布目录
         run: |
-          mkdir -p _site/cards
+          mkdir -p _site/cards _site/stockbee
           cp out/cls-news-latest.html _site/index.html
           cp out/cls-news-cards.html  _site/cards/index.html
           cp out/cls-news-latest.csv  _site/news.csv
@@ -86,9 +95,20 @@ jobs:
           cp out/status.json          _site/status.json
           cp data/research.json _site/research.json
           cp data/technical.json _site/technical.json
+          if [ -f out/stockbee/index.html ]; then
+            cp out/stockbee/index.html _site/stockbee/index.html
+            cp out/stockbee.csv        _site/stockbee/stockbee.csv
+            cp out/stockbee.json       _site/stockbee.json
+            cp out/stockbee.json       _site/stockbee/stockbee.json
+          else
+            echo 'WARN: 本轮未生成 stockbee，沿用线上上一版，避免部署把它冲掉'
+            curl -fsSL --retry 2 https://yunqingzou-bit.github.io/cls-news-dashboard/stockbee/index.html -o _site/stockbee/index.html || true
+            curl -fsSL --retry 2 https://yunqingzou-bit.github.io/cls-news-dashboard/stockbee/stockbee.json -o _site/stockbee/stockbee.json || true
+            curl -fsSL --retry 2 https://yunqingzou-bit.github.io/cls-news-dashboard/stockbee/stockbee.csv -o _site/stockbee/stockbee.csv || true
+          fi
           TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M %Z' > _site/updated.txt
           echo '--- 明细 ---'
-          wc -c _site/index.html _site/cards/index.html _site/news.csv
+          wc -c _site/index.html _site/cards/index.html _site/news.csv _site/stockbee/index.html
 
       - uses: actions/configure-pages@v5
         with:
