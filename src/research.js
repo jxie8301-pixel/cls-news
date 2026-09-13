@@ -244,7 +244,14 @@ function displayEvent(record) {
 
 function conclusionFor(record, rows) {
   if (!record || record.errorOnly) {
-    return '题材与估值数据暂未取到；未来三个月潜力暂无法可靠评估。当前关注表内新闻催化及后续定期报告；增减持信息待下一轮数据恢复后补充。';
+    return [
+      '题材：数据暂未取到',
+      '估值：数据暂未取到',
+      '未来三个月潜力：暂无法可靠评估，当前关注表内新闻催化及后续定期报告',
+      '目前大事：待下一轮数据恢复后补充',
+      '未来三个月：关注后续定期报告与新闻催化',
+      '股东动向：待下一轮数据恢复后补充',
+    ].join('\n');
   }
   const themes = [record.industry].concat(record.concepts || []).filter(Boolean).slice(0, 5).join('、') || '资料暂缺';
   const p = scorePotential(record);
@@ -252,9 +259,14 @@ function conclusionFor(record, rows) {
   const current = ev ? String(ev.time || '').slice(5, 10) + ' ' + shortTitle(ev.title, record.name, 42) : '近半年未检索到重大事项类公告';
   const news = latestNewsText(rows);
   const future = nextReportEvent(new Date()) + '，并关注' + followUpFor(record.keyEvents);
-  return '题材：' + themes + '。估值（截至' + (record.asOfDate || String(record.researchedAt || '').slice(0, 10)) + '抓取的最近收盘）：' + valuationText(record) +
-    '。未来三个月潜力：' + p.level + '（模型' + p.score + '/100），' + (news ? '近期催化为“' + news + '”，' : '') +
-    '主要风险为' + riskText(record) + '。目前大事：' + current + '。未来三个月：' + future + '。股东动向：' + holdingText(record) + '。';
+  return [
+    '题材：' + themes,
+    '估值（截至' + (record.asOfDate || String(record.researchedAt || '').slice(0, 10)) + '抓取的最近收盘）：' + valuationText(record),
+    '未来三个月潜力：' + p.level + '（模型' + p.score + '/100），' + (news ? '近期催化为“' + news + '”，' : '') + '主要风险为' + riskText(record),
+    '目前大事：' + current,
+    '未来三个月：' + future,
+    '股东动向：' + holdingText(record),
+  ].join('\n');
 }
 
 async function researchOne(stock) {
