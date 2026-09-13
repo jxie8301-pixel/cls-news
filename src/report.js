@@ -116,8 +116,9 @@ function toHtml(rows, meta) {
   const body = rows.map(function (r) {
     const stockText = esc(r.stock || r.stocks);
     const stockHtml = r.stockCode
-      ? '<a href=' + Q + 'https://www.cls.cn/stock?code=' + esc(r.stockCode) + Q +
-        ' target=' + Q + '_blank' + Q + ' rel=' + Q + 'noreferrer' + Q + '>' + stockText + '</a>'
+      ? '<a href=' + Q + 'https://quote.eastmoney.com/' + encodeURIComponent(r.stockCode) + '.html' + Q +
+        ' target=' + Q + '_blank' + Q + ' rel=' + Q + 'noopener noreferrer' + Q +
+        ' title=' + Q + '在东方财富查看行情与K线' + Q + '>' + stockText + '</a>'
       : stockText;
     return '<tr data-prefix=' + Q + esc(r.prefix) + Q + '>' +
       '<td class=' + Q + 't' + Q + ' data-label=' + Q + '新闻发布时间' + Q + '>' + esc(r.time) + '</td>' +

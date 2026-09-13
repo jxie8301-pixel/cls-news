@@ -246,7 +246,7 @@ function render() {
     // 每一行就是一篇文章 x 一只股票，这里只显示该行对应的那一只
     var stkLabel = r.stock || r.stocks || '';
     var stkHtml = r.stockCode
-      ? '<a href="https://www.cls.cn/stock?code=' + h(r.stockCode) + '" target="_blank" rel="noreferrer">' + h(stkLabel) + '</a>'
+      ? '<a href="https://quote.eastmoney.com/' + encodeURIComponent(r.stockCode) + '.html" target="_blank" rel="noopener noreferrer" title="在东方财富查看行情与K线">' + h(stkLabel) + '</a>'
       : h(stkLabel);
     return '<tr' + fresh + ' data-id="' + h(r.id) + '">' +
       '<td class="time" data-label="发布时间">' + h(r.time) + '</td>' +
