@@ -11,6 +11,7 @@
   "marketPool": { "enabled": true, "key": "all-a", "name": "沪深A股", "market": "all" },
   "marketPageSize": 200,
   "research": { "enabled": true, "refreshHours": 24, "concurrency": 5 },
+  "backup": { "enabled": true, "dir": "", "keepDays": 30, "secondDir": "" },
   "indexPools": [],
   "prefixes": [
     "盘中宝",

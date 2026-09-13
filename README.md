@@ -22,6 +22,34 @@ node src/server.js
 程序启动后会先同步股票池、再抓一次，之后按刷新节奏自动刷新：交易日 07:00-16:00 每 10 分钟、交易日其他时段每 2 小时、非交易日每 6 小时（交易日用上证指数当日日K核对，节假日自动按非交易日处理）。把 `config.json` 里的 `schedulePolicy` 设为 `false` 可以改回固定的 `refreshMinutes`。页面自己每 30 秒拉一次数据，新出现的新闻会高亮。
 
 ## 一次性抓取并导出表格
+
+## 每日自动备份
+
+数据（新闻缓存、调研结论、自选股、股票池）、配置、代码和最新导出表格，每天自动备份一份到 OneDrive 目录 `财联社备份\<日期>\`。OneDrive 会把它同步到云端，所以换机或误删都能找回来，也不依赖电脑一直开着。
+
+备份内容按原目录结构存放，外层多一个 `manifest.json` 清单（备份时间、代码版本、文件清单与校验值、以及文章/调研/自选股条数），打开就能看清这份备份里有什么。默认保留最近 30 天，更早的自动清理；只清理脚本自己生成的日期目录。
+
+```bash
+npm run backup                      # 手动备份一次（当天已备份过会自动跳过）
+node src/backup.js --force          # 强制再备份一份，覆盖当天快照
+node src/backup.js --list           # 查看已有快照
+node src/backup.js --restore 2026-09-13            # 预览会恢复哪些文件
+node src/backup.js --restore 2026-09-13 --yes      # 真正恢复到项目目录
+```
+
+定时执行由 Windows 计划任务「财联社新闻-每日备份」负责：每天 18:30 运行，勾选了「错过时间后尽快补运行」和「唤醒计算机」，所以电脑当时关机或睡眠也会在下次可用时补上。要改时间或停用，在「任务计划程序」里编辑该任务即可。
+
+备份位置和保留天数可以在 `config.json` 里调整：
+
+```jsonc
+"backup": {
+  "enabled": true,
+  "dir": "",          // 留空 = OneDrive\财联社备份；也可写任意目录
+  "keepDays": 30,      // 保留最近多少天
+  "secondDir": ""      // 可选：再存一份到别的盘，例如 "F:\\财联社备份"
+}
+```
+
 ## 手机 / 外网访问（Tailscale）
 
 面板默认只监听回环地址，外部访问不到。程序支持自动绑定 Tailscale 私有网卡（config.json 里 tailscale 设 false 可关闭）：
@@ -155,6 +183,7 @@ src/report.js     CSV / HTML / JSON 导出
 src/cli.js        命令行一次性抓取与导出
 src/server.js     本地服务 + 自动刷新调度
 src/schedule.js   刷新节奏判断（交易日 / 时段 → 间隔）
+src/backup.js     每日备份（打包数据/配置/代码，含清单与恢复）
 public/index.html 实时面板（原生 JS，无构建）
 data/watchlist.json  自选股名单
 data/pools/*.json    股票池名单（all-a.json = 沪深A股全量）

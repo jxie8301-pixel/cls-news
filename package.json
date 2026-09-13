@@ -8,6 +8,7 @@
     "start": "node src/server.js",
     "collect": "node src/cli.js",
     "export": "node src/cli.js --export",
+    "backup": "node src/backup.js",
     "watchlist": "node src/watchlist.js"
   },
   "engines": {
