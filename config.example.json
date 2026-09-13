@@ -2,6 +2,7 @@
   "port": 8848,
   "accessToken": "",
   "refreshMinutes": 10,
+  "schedulePolicy": true,
   "days": 7,
   "concurrency": 12,
   "requestDelayMs": 0,

@@ -5,9 +5,13 @@ on:
     branches: [main, master]
   workflow_dispatch:
   schedule:
-    # 每 10 分钟一次（UTC）。GitHub 定时任务最小粒度是 5 分钟；
-    # 每 30 分钟一次（UTC）。刻意避开整点（:00）这个最拥挤的槽位。
-    # 注意：schedule 在平台繁忙时会被延后，实际间隔常见 30~60 分钟。
+    # 每 30 分钟触发一次（UTC），刻意避开整点这个最拥挤的槽位。
+    # 是否真的抓取由 src/schedule.js 按刷新节奏判断：
+    #   交易日 07:00-16:00 -> 每 30 分钟
+    #   交易日 其他时段     -> 每 2 小时
+    #   非交易日            -> 每 6 小时
+    # 交易日用上证指数当日日K核对，A 股节假日自动按非交易日处理。
+    # 注意：schedule 在平台繁忙时会被延后，实际触发常见 30~60 分钟。
     - cron: '7,37 * * * *'
 
 permissions:
@@ -20,7 +24,38 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  gate:
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.decide.outputs.run }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: 判断本轮是否需要刷新
+        id: decide
+        run: |
+          if [ "${{ github.event_name }}" != "schedule" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "非定时触发（${{ github.event_name }}），直接执行。"
+            exit 0
+          fi
+          set +e
+          node src/schedule.js --check
+          code=$?
+          set -e
+          if [ "$code" = "3" ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+
   build:
+    needs: gate
+    if: needs.gate.outputs.run == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -47,6 +82,7 @@ jobs:
           cp out/cls-news-cards.html  _site/cards/index.html
           cp out/cls-news-latest.csv  _site/news.csv
           cp out/cls-news-latest.json _site/news.json
+          cp out/status.json          _site/status.json
           cp data/research.json _site/research.json
           TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M %Z' > _site/updated.txt
           echo '--- 明细 ---'

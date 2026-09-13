@@ -1,5 +1,7 @@
 'use strict';
 
+const fs = require('node:fs');
+const path = require('node:path');
 const collectMod = require('./collect.js');
 const report = require('./report.js');
 const cls = require('./cls.js');
@@ -95,12 +97,13 @@ function siteLinks() { return process.argv.includes('--site-links'); }
   } else {
     research.attachRows(rows);
   }
-  const out = report.exportAll(rows, {
+  const meta = {
     title: '财联社 沪深A股 · 目标栏目新闻',
     range: rangeLabel(days),
     poolLabel: selected.map(function (p) { return p.name + '（' + p.count + ' 只）'; }).join(' / '),
     generatedAt: new Date().toLocaleString('zh-CN'),
-  }, {
+  };
+  const out = report.exportAll(rows, meta, {
     fileBase: 'cls-news',
     layout: 'table',
     // Pages 上主页面是表格版，附带一个「卡片版」子页面；本地导出不加互跳链接，避免 file:// 打开时链接失效
@@ -113,4 +116,17 @@ function siteLinks() { return process.argv.includes('--site-links'); }
   console.log('  ' + out.htmlPath);
   console.log('  ' + out.jsonPath);
   if (out.cardsPath) console.log('  ' + out.cardsPath + '  （卡片版）');
+
+  // 发布状态：定时任务据此判断“距上次刷新多久了”，决定本轮是否真的重新抓取
+  const nowMs = Date.now();
+  const statusPath = path.join(report.OUT_DIR, 'status.json');
+  fs.writeFileSync(statusPath, JSON.stringify({
+    publishedAt: nowMs,
+    publishedAtShanghai: cls.fmtTime(Math.floor(nowMs / 1000)),
+    range: meta.range,
+    poolLabel: meta.poolLabel,
+    days: days,
+    rows: rows.length,
+  }, null, 2), 'utf8');
+  console.log('  ' + statusPath + '  （发布状态）');
 })().catch(function (e) { console.error('运行失败:', e); process.exit(1); });

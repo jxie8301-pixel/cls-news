@@ -9,6 +9,7 @@ const collectMod = require('./collect.js');
 const report = require('./report.js');
 const cls = require('./cls.js');
 const research = require('./research.js');
+const schedule = require('./schedule.js');
 
 const ROOT = collectMod.ROOT;
 const PUBLIC_DIR = path.join(ROOT, 'public');
@@ -113,12 +114,31 @@ async function refresh(reason) {
 }
 
 let timer = null;
-function scheduleNext() {
-  const c = cfg();
-  const ms = Math.max(1, c.refreshMinutes || 10) * 60000;
+function armTimer(ms) {
   state.nextRunAt = new Date(Date.now() + ms).toISOString();
   if (timer) clearTimeout(timer);
   timer = setTimeout(function () { refresh('定时刷新'); }, ms);
+}
+
+/**
+ * 下一次刷新时间：默认按刷新节奏策略（交易日盘中 30 分钟 / 交易日其他时段 2 小时 / 非交易日 6 小时，
+ * 见 src/schedule.js）。把 config.schedulePolicy 设为 false 可退回固定的 refreshMinutes。
+ */
+function scheduleNext() {
+  const c = cfg();
+  const fixedMs = Math.max(1, c.refreshMinutes || 10) * 60000;
+  if (c.schedulePolicy === false) {
+    armTimer(fixedMs);
+    return;
+  }
+  schedule
+    .decide({ lastPublishedAt: state.lastRunAt ? Date.parse(state.lastRunAt) : null })
+    .then(function (d) {
+      const ms = d.run ? 5000 : Math.max(60000, d.remainingMs);
+      armTimer(ms);
+      console.log('  下次刷新约 ' + Math.max(1, Math.round(ms / 60000)) + ' 分钟后 ｜ ' + d.label + ' ｜ ' + (d.isTradingDay ? '交易日' : '非交易日'));
+    })
+    .catch(function () { armTimer(fixedMs); });
 }
 
 function listExports() {
@@ -410,7 +430,7 @@ setTimeout(function () {
   console.log('  财联社自选股 · 栏目新闻实时盯盘');
   console.log('  ------------------------------------------------');
   console.log('  自选股 ' + wl.count + ' 只 ｜ 目标栏目 ' + cfg().prefixes.join('、'));
-  console.log('  回溯窗口 ' + cfg().days + ' 天 ｜ 自动刷新间隔 ' + cfg().refreshMinutes + ' 分钟');
+  console.log('  回溯窗口 ' + cfg().days + ' 天 ｜ 刷新节奏 ' + (cfg().schedulePolicy === false ? '固定每 ' + cfg().refreshMinutes + ' 分钟' : '交易日盘中30分钟 · 交易日其他时段2小时 · 非交易日6小时'));
   console.log('  已缓存文章 ' + Object.keys(store.articles || {}).length + ' 条');
   console.log('');
   console.log('  按 Ctrl+C 退出');
