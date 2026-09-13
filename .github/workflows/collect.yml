@@ -38,18 +38,19 @@ jobs:
       - name: 抓取（只跑沪深A股池，避免把个人自选股带进公开页面）
         env:
           TZ: Asia/Shanghai
-        run: node src/cli.js --pool all-a --days 7
+        run: node src/cli.js --pool all-a --days 7 --site-links
 
       - name: 组装发布目录
         run: |
-          mkdir -p _site
+          mkdir -p _site/cards
           cp out/cls-news-latest.html _site/index.html
+          cp out/cls-news-cards.html  _site/cards/index.html
           cp out/cls-news-latest.csv  _site/news.csv
           cp out/cls-news-latest.json _site/news.json
           cp data/research.json _site/research.json
           TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M %Z' > _site/updated.txt
           echo '--- 明细 ---'
-          wc -c _site/index.html _site/news.csv
+          wc -c _site/index.html _site/cards/index.html _site/news.csv
 
       - uses: actions/configure-pages@v5
         with:

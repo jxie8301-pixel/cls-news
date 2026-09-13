@@ -136,13 +136,29 @@ function researchHtml(value) {
   }).join('');
 }
 
-const CSS = "body{font-family:'Microsoft YaHei',system-ui,sans-serif;margin:24px;color:#1c1c1e;background:#fafafa}h1{font-size:20px;margin:0 0 6px}.meta{color:#666;font-size:13px;margin-bottom:16px}table{border-collapse:collapse;width:100%;background:#fff;font-size:13px;table-layout:fixed}th,td{border:1px solid #e5e5e5;padding:8px 10px;vertical-align:top;text-align:left;overflow-wrap:anywhere;word-break:break-word}th{background:#f2f3f5;position:sticky;top:0;z-index:2}td.t{white-space:normal;color:#555;font-variant-numeric:tabular-nums}td.txt{line-height:1.6;white-space:pre-wrap}td.src{white-space:nowrap;color:#888;font-size:12px}.pf{display:inline-block;background:#fff1e6;color:#c2410c;border:1px solid #ffd7bd;border-radius:3px;padding:1px 6px;white-space:nowrap}.pl{display:inline-block;background:#eef4fb;color:#1257a8;border:1px solid #cfe0f2;border-radius:3px;padding:1px 6px;white-space:nowrap;font-size:12px;margin:0 3px 2px 0}a{color:#1257a8;text-decoration:none}a:hover{text-decoration:underline}@media (max-width:760px){html,body{max-width:100%;overflow-x:hidden}body{margin:10px}h1{font-size:16px}.meta{font-size:12px;margin-bottom:10px}table,tbody{display:block;width:100%;min-width:0}table{border:0;background:transparent;table-layout:auto}colgroup{display:none}thead{display:none}tbody tr{display:flex;width:100%;min-width:0;flex-direction:column;background:#fff;border:1px solid #e5e5e5;border-radius:10px;padding:10px 12px;margin-bottom:10px}tbody td{display:block;width:100%;min-width:0;max-width:100%;border:0;padding:2px 0;white-space:normal;overflow-wrap:anywhere;word-break:break-word}tbody td::before{content:attr(data-label);display:block;color:#888;font-size:11.5px;line-height:1.5}td[data-label=\"新闻标题\"]{order:1;font-size:15px;font-weight:600;padding-bottom:6px}td[data-label=\"新闻标题\"]::before{display:none}td[data-label=\"涉及股票\"]{order:2}td.txt{order:3;padding-top:6px;white-space:pre-wrap}td[data-label=\"新闻发布时间\"]{order:4;padding-top:6px}td[data-label=\"前缀类型\"]{order:5}td.src{order:6}td[data-label=\"所属股票池\"]{order:7}}" ;
+const CSS_BASE = "body{font-family:'Microsoft YaHei',system-ui,sans-serif;margin:24px;color:#1c1c1e;background:#fafafa}h1{font-size:20px;margin:0 0 6px}.meta{color:#666;font-size:13px;margin-bottom:16px}.meta a{white-space:nowrap}table{border-collapse:collapse;width:100%;background:#fff;font-size:13px;table-layout:fixed}th,td{border:1px solid #e5e5e5;padding:8px 10px;vertical-align:top;text-align:left;overflow-wrap:anywhere;word-break:break-word}th{background:#f2f3f5;position:sticky;top:0;z-index:2}td.t{white-space:normal;color:#555;font-variant-numeric:tabular-nums}td.txt{line-height:1.6;white-space:pre-wrap}td.src{white-space:nowrap;color:#888;font-size:12px}.pf{display:inline-block;background:#fff1e6;color:#c2410c;border:1px solid #ffd7bd;border-radius:3px;padding:1px 6px;white-space:nowrap}.pl{display:inline-block;background:#eef4fb;color:#1257a8;border:1px solid #cfe0f2;border-radius:3px;padding:1px 6px;white-space:nowrap;font-size:12px;margin:0 3px 2px 0}a{color:#1257a8;text-decoration:none}a:hover{text-decoration:underline}.tw{background:#fff}" ;
+
+// 表格版：手机上仍然是表格，靠横向滚动保证列宽，避免挤压与文字重叠
+const CSS_MOBILE_TABLE = "@media (max-width:760px){html,body{max-width:100%}body{margin:10px}h1{font-size:16px}.meta{font-size:12px;margin-bottom:10px}.tw{overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid #e5e5e5;border-radius:8px}table{width:1080px;min-width:1080px}th,td{font-size:12.5px;padding:6px 8px}th{position:static}td.t{font-size:12px}.research-item{margin-bottom:6px}}";
+
+// 卡片版：窄屏把每行折叠成一张卡片（手机上更好读，作为独立链接保留）
+const CSS_MOBILE_CARDS = "@media (max-width:760px){html,body{max-width:100%;overflow-x:hidden}body{margin:10px}h1{font-size:16px}.meta{font-size:12px;margin-bottom:10px}.tw{overflow:visible;border:0;border-radius:0}table,tbody{display:block;width:100%;min-width:0}table{border:0;background:transparent;table-layout:auto}colgroup{display:none}thead{display:none}tbody tr{display:flex;width:100%;min-width:0;flex-direction:column;background:#fff;border:1px solid #e5e5e5;border-radius:10px;padding:10px 12px;margin-bottom:10px}tbody td{display:block;width:100%;min-width:0;max-width:100%;border:0;padding:2px 0;white-space:normal;overflow-wrap:anywhere;word-break:break-word}tbody td::before{content:attr(data-label);display:block;color:#888;font-size:11.5px;line-height:1.5}td[data-label=\"新闻标题\"]{order:1;font-size:15px;font-weight:600;padding-bottom:6px}td[data-label=\"新闻标题\"]::before{display:none}td[data-label=\"涉及股票\"]{order:2}td.txt{order:3;padding-top:6px;white-space:pre-wrap}td[data-label=\"新闻发布时间\"]{order:4;padding-top:6px}td[data-label=\"前缀类型\"]{order:5}td.src{order:6}td[data-label=\"所属股票池\"]{order:7}.research-item{margin-bottom:7px}}";
 
 const BAR_CSS = ".bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 12px}.bar input[type=search]{flex:1 1 240px;min-width:0;font:inherit;font-size:13px;padding:7px 10px;border:1px solid #e5e5e5;border-radius:7px;background:#fff;color:#1c1c1e}.bar select{font:inherit;font-size:13px;padding:7px 10px;border:1px solid #e5e5e5;border-radius:7px;background:#fff;color:#1c1c1e;max-width:220px}.cnt{color:#888;font-size:12px;white-space:nowrap}@media (max-width:760px){.bar input[type=search]{flex:1 1 100%}.bar select{flex:1 1 40%}}";
 
 const EXTRA_CSS = "td.perf,td.day{font-variant-numeric:tabular-nums;font-size:12.5px;line-height:1.7;color:#3b4149}td.turn,td.vol{font-variant-numeric:tabular-nums;font-size:12.5px;font-weight:600}td.research{font-size:12.5px;line-height:1.7;color:#3b4149}.research-item{display:block;margin:0 0 5px}.research-item:last-child{margin-bottom:0}.research-key{font-weight:700;color:#20252b}.research-impact{color:#c62828;font-weight:700}.v-green{color:#0f9d58}.v-blue{color:#1a73e8}.v-red{color:#d93025}.up-strong{color:#d93025;font-weight:600}.up-limit{color:#8b0000;font-weight:700}@media (max-width:760px){td[data-label=\"发布后表现\"]{order:3}td[data-label=\"当日行情\"]{order:4}td[data-label=\"换手率\"]{order:5}td[data-label=\"量较前日\"]{order:6}td[data-label=\"调研结论\"]{order:7;padding-top:7px}td[data-label=\"新闻发布时间\"]{order:8}td[data-label=\"前缀类型\"]{order:9}.research-item{margin-bottom:7px}}";
 
-function toHtml(rows, meta) {
+/**
+ * opts.layout: 'table'（默认，任何屏幕都保持表格，窄屏横向滚动）| 'cards'（窄屏折叠成卡片）
+ * opts.links: 附加在标题栏的互跳链接，形如 [{href,label}]
+ */
+function toHtml(rows, meta, opts) {
+  opts = opts || {};
+  const layout = opts.layout === 'cards' ? 'cards' : 'table';
+  const mobileCss = layout === 'cards' ? CSS_MOBILE_CARDS : CSS_MOBILE_TABLE;
+  const links = (opts.links || []).map(function (l) {
+    return ' <a href=' + Q + esc(l.href) + Q + '>' + esc(l.label) + '</a>';
+  }).join('');
   // 只渲染数据行实际存在的列，避免表头多出两列空列
   const th = HTML_HEADERS.map(function (h) { return '<th>' + esc(h) + '</th>'; }).join('');
   const colgroup = '<colgroup>' + HTML_COL_WIDTHS.map(function (w) { return '<col style=' + Q + 'width:' + w + '%' + Q + '>'; }).join('') + '</colgroup>';
@@ -177,13 +193,13 @@ function toHtml(rows, meta) {
     '<!doctype html>',
     '<html lang=' + Q + 'zh-CN' + Q + '><head><meta charset=' + Q + 'utf-8' + Q + '><meta name=' + Q + 'viewport' + Q + ' content=' + Q + 'width=device-width, initial-scale=1' + Q + '>',
     '<title>财联社栏目新闻 ' + esc(meta.title || '') + '</title>',
-    '<style>' + CSS + BAR_CSS + EXTRA_CSS + '</style></head><body>',
+    '<style>' + CSS_BASE + mobileCss + BAR_CSS + EXTRA_CSS + '</style></head><body>',
     '<h1>' + esc(meta.title || '财联社自选股 · 目标栏目新闻') + '</h1>',
-    '<div class=' + Q + 'meta' + Q + '>区间 ' + esc(meta.range) + ' ｜ 共 ' + rows.length + ' 条 ｜ 股票池 ' + esc(meta.poolLabel) + ' ｜ 生成于 ' + esc(meta.generatedAt) + '</div>',
+    '<div class=' + Q + 'meta' + Q + '>区间 ' + esc(meta.range) + ' ｜ 共 ' + rows.length + ' 条 ｜ 股票池 ' + esc(meta.poolLabel) + ' ｜ 生成于 ' + esc(meta.generatedAt) + links + '</div>',
     toolbar,
-    '<table>' + colgroup + '<thead><tr>' + th + '</tr></thead><tbody>',
+    '<div class=' + Q + 'tw' + Q + '><table>' + colgroup + '<thead><tr>' + th + '</tr></thead><tbody>',
     body,
-    '</tbody></table>',
+    '</tbody></table></div>',
     script,
     '</body></html>',
   ].join('\n');
@@ -210,10 +226,10 @@ function exportAll(rows, meta, opts) {
       json: path.join(OUT_DIR, base + '-latest.json'),
     };
     fs.writeFileSync(fix.csv, toCsv(rows), 'utf8');
-    fs.writeFileSync(fix.html, toHtml(rows, meta), 'utf8');
+    fs.writeFileSync(fix.html, toHtml(rows, meta, opts), 'utf8');
     fs.writeFileSync(fix.json, JSON.stringify({ meta: meta, rows: rows }, null, 1), 'utf8');
     pruneExports(base, 5);
-    return { csvPath: fix.csv, htmlPath: fix.html, jsonPath: fix.json };
+    return { csvPath: fix.csv, htmlPath: fix.html, jsonPath: fix.json, cardsPath: writeCardsVariant(rows, meta, opts, base) };
   }
   fs.mkdirSync(OUT_DIR, { recursive: true });
   const tag = stamp();
@@ -221,13 +237,24 @@ function exportAll(rows, meta, opts) {
   const htmlPath = path.join(OUT_DIR, base + '-' + tag + '.html');
   const jsonPath = path.join(OUT_DIR, base + '-' + tag + '.json');
   fs.writeFileSync(csvPath, toCsv(rows), 'utf8');
-  fs.writeFileSync(htmlPath, toHtml(rows, meta), 'utf8');
+  fs.writeFileSync(htmlPath, toHtml(rows, meta, opts), 'utf8');
   fs.writeFileSync(jsonPath, JSON.stringify({ meta: meta, rows: rows }, null, 1), 'utf8');
   fs.copyFileSync(csvPath, path.join(OUT_DIR, base + '-latest.csv'));
   fs.copyFileSync(htmlPath, path.join(OUT_DIR, base + '-latest.html'));
   fs.copyFileSync(jsonPath, path.join(OUT_DIR, base + '-latest.json'));
   pruneExports(base, 5);
-  return { csvPath: csvPath, htmlPath: htmlPath, jsonPath: jsonPath };
+  return { csvPath: csvPath, htmlPath: htmlPath, jsonPath: jsonPath, cardsPath: writeCardsVariant(rows, meta, opts, base) };
+}
+
+/**
+ * 另存一份「卡片版」页面（窄屏折叠成卡片）。
+ * 主页面保持表格形式，卡片版作为独立链接保留同一套数据。
+ */
+function writeCardsVariant(rows, meta, opts, base) {
+  if (!opts.alsoCards) return null;
+  const p = path.join(OUT_DIR, base + '-cards.html');
+  fs.writeFileSync(p, toHtml(rows, meta, { layout: 'cards', links: opts.cardsLinks || [] }), 'utf8');
+  return p;
 }
 
 /** 只保留最近 keepSets 组带时间戳的导出，避免定期刷新把 out/ 撑爆。 */

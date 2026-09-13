@@ -24,6 +24,9 @@ function rangeLabel(days) {
   return cls.fmtTime(nowSec - days * 86400).slice(0, 10) + ' ~ ' + cls.fmtTime(nowSec).slice(0, 10);
 }
 
+// 发布到 Pages 时两个版本互跳；本地导出保持无链接
+function siteLinks() { return process.argv.includes('--site-links'); }
+
 (async () => {
   const cfg = collectMod.loadConfig();
   const days = parseInt(arg('days', cfg.days || 7), 10);
@@ -97,9 +100,17 @@ function rangeLabel(days) {
     range: rangeLabel(days),
     poolLabel: selected.map(function (p) { return p.name + '（' + p.count + ' 只）'; }).join(' / '),
     generatedAt: new Date().toLocaleString('zh-CN'),
-  }, { fileBase: 'cls-news' });
+  }, {
+    fileBase: 'cls-news',
+    layout: 'table',
+    // Pages 上主页面是表格版，附带一个「卡片版」子页面；本地导出不加互跳链接，避免 file:// 打开时链接失效
+    links: siteLinks() ? [{ href: 'cards/', label: '卡片版' }] : [],
+    alsoCards: true,
+    cardsLinks: siteLinks() ? [{ href: '../', label: '表格版' }] : [],
+  });
   console.log('表格共 ' + rows.length + ' 条，已导出：');
   console.log('  ' + out.csvPath);
   console.log('  ' + out.htmlPath);
   console.log('  ' + out.jsonPath);
+  if (out.cardsPath) console.log('  ' + out.cardsPath + '  （卡片版）');
 })().catch(function (e) { console.error('运行失败:', e); process.exit(1); });
