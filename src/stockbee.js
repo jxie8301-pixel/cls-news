@@ -160,12 +160,28 @@ async function fetchSina(code, n) {
 }
 
 async function fetchBars(code, n) {
-  try {
-    const b = await fetchTencent(code, n);
-    if (b.length >= 30) return { bars: b, src: 'tencent-qfq' };
-  } catch (_) { /* 落到新浪 */ }
+  if (!fetchBars.sinaOnly) {
+    try {
+      const b = await fetchTencent(code, n);
+      if (b.length >= 30) return { bars: b, src: 'tencent-qfq' };
+    } catch (_) { /* 落到新浪 */ }
+  }
   const s = await fetchSina(code, n);
   return { bars: s, src: 'sina-raw' };
+}
+
+/** 先用指数探一次腾讯：连不上（例如云端网络到不了 ifzq）就整轮改用新浪，避免每只股票都白等超时。 */
+async function probeSource(log) {
+  const t0 = Date.now();
+  try {
+    const b = await fetchTencent(INDEX_CODE, 5);
+    if (b.length) {
+      log('  数据源探测：腾讯前复权可用（' + (Date.now() - t0) + 'ms）');
+      return;
+    }
+  } catch (_) { /* 下面统一处理 */ }
+  fetchBars.sinaOnly = true;
+  log('  数据源探测：腾讯不可用（' + (Date.now() - t0) + 'ms），本轮改用新浪日线（不复权）');
 }
 
 /* ------------------------------------------------------------ 指标 */
@@ -374,43 +390,53 @@ async function loadBarsMap(codes, o, log) {
   const out = new Map();
   const started = Date.now();
   const deadline = started + o.maxScanMinutes * 60 * 1000;
-  let done = 0, fetched = 0, fromCache = 0, failed = 0;
-  const queue = codes.slice();
+  let done = 0, failed = 0;
 
-  async function worker() {
-    for (;;) {
-      if (Date.now() > deadline) return;
-      const code = queue.shift();
-      if (!code) return;
-      const hit = cache[code];
-      if (hit && Array.isArray(hit.bars) && hit.bars.length >= 30) {
-        out.set(code, hit.bars);
-        fromCache++;
+  /** 跑一轮：并发抓取 list 里的代码（缓存命中的直接返回）。 */
+  async function runPool(list, concurrency, delayMs) {
+    const queue = list.slice();
+    async function worker() {
+      for (;;) {
+        if (Date.now() > deadline) return;
+        const code = queue.shift();
+        if (!code) return;
+        if (out.has(code)) continue;
+        const hit = cache[code];
+        if (hit && Array.isArray(hit.bars) && hit.bars.length >= 30) {
+          out.set(code, hit.bars);
+          continue;
+        }
+        try {
+          const r = await fetchBars(code, o.datalen);
+          if (r.bars.length >= 30) { out.set(code, r.bars); cache[code] = { src: r.src, bars: r.bars }; }
+        } catch (_) { /* 记到下一轮补抓 */ }
         done++;
-        continue;
+        if (delayMs) await new Promise(function (r2) { setTimeout(r2, delayMs); });
+        if (!o.quiet && done % 500 === 0) log('  已处理 ' + done + '/' + codes.length + '（成功 ' + out.size + '）');
+        if (Date.now() > deadline) return;
       }
-      try {
-        const r = await fetchBars(code, o.datalen);
-        if (r.bars.length >= 30) { out.set(code, r.bars); cache[code] = { src: r.src, bars: r.bars }; }
-        else failed++;
-      } catch (_) { failed++; }
-      fetched++;
-      done++;
-      if (!o.quiet && done % 250 === 0) {
-        log('  已处理 ' + done + '/' + codes.length + '（新抓 ' + fetched + '，缓存 ' + fromCache + '，失败 ' + failed + '）');
-      }
-      if (Date.now() > deadline) return;
     }
+    const workers = [];
+    for (let i = 0; i < Math.max(1, concurrency); i++) workers.push(worker());
+    await Promise.all(workers);
   }
 
-  const workers = [];
-  for (let i = 0; i < Math.max(1, o.concurrency); i++) workers.push(worker());
-  await Promise.all(workers);
+  await runPool(codes, o.concurrency, 0);
+
+  // 云端对行情接口有突发限流：失败的多半是瞬时限流，降并发 + 小间隔再补两轮
+  for (let round = 1; round <= 2; round++) {
+    const remaining = codes.filter(function (c) { return !out.has(c); });
+    if (!remaining.length || Date.now() > deadline) break;
+    log('  第 ' + round + ' 轮补抓：' + remaining.length + ' 只');
+    await runPool(remaining, Math.max(3, Math.round(o.concurrency / 4)), 80);
+  }
+
+  failed = codes.length - out.size;
 
   if (!o.noCache) {
     try { writeJson(BARS_CACHE, cache); } catch (_) { /* 缓存写失败不影响结果 */ }
   }
-  log('  取数完成：成功 ' + out.size + '，失败 ' + failed + '，用时 ' + Math.round((Date.now() - started) / 1000) + 's');
+  log('  取数完成：成功 ' + out.size + '/' + codes.length + '（缺 ' + failed + '），用时 ' + Math.round((Date.now() - started) / 1000) + 's');
   return { bars: out, failed: failed };
 }
 
@@ -774,6 +800,7 @@ async function main() {
   fs.mkdirSync(OUT_DIR, { recursive: true });
 
   log('=== Stockbee Momentum Burst · A股 ===');
+  await probeSource(log);
   const indexBars = (await fetchBars(INDEX_CODE, 400)).bars;
   if (!indexBars.length) throw new Error('无法获取上证指数日线，无法判定交易日与市场闸门');
   const bj = shanghaiParts();
@@ -783,12 +810,18 @@ async function main() {
 
   if (o.skipIfFresh && !o.force) {
     const published = readJson(JSON_FILE);
-    if (published && published.lastCompleteDay === lastIdxDay && Array.isArray(published.rows)) {
+    // 除了「已覆盖最新交易日」，还要求上一轮抓取覆盖率足够（云端偶发限流会让覆盖率掉下来）
+    const cov = (published && published.coverage) || {};
+    const coverageOk = !cov.universe || (cov.barsOk || 0) >= cov.universe * 0.95;
+    if (published && published.lastCompleteDay === lastIdxDay && Array.isArray(published.rows) && coverageOk) {
       log('  已发布数据已覆盖最新交易日 ' + lastIdxDay + '，跳过抓取，仅重新生成页面');
       fs.mkdirSync(path.dirname(HTML_FILE), { recursive: true });
       fs.writeFileSync(HTML_FILE, renderHtml(), 'utf8');
       writeCsv(published.rows);
       return;
+    }
+    if (published && published.lastCompleteDay === lastIdxDay && !coverageOk) {
+      log('  上一轮覆盖率偏低（' + (cov.barsOk || 0) + '/' + (cov.universe || 0) + '），本轮重新抓取补齐');
     }
   }
 
