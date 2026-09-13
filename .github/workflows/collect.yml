@@ -69,6 +69,7 @@ jobs:
           cp config.example.json config.json
           mkdir -p data
           curl -fsSL --retry 2 https://yunqingzou-bit.github.io/cls-news-dashboard/research.json -o data/research.json || true
+          curl -fsSL --retry 2 https://yunqingzou-bit.github.io/cls-news-dashboard/technical.json -o data/technical.json || true
 
       - name: 抓取（只跑沪深A股池，避免把个人自选股带进公开页面）
         env:
@@ -84,6 +85,7 @@ jobs:
           cp out/cls-news-latest.json _site/news.json
           cp out/status.json          _site/status.json
           cp data/research.json _site/research.json
+          cp data/technical.json _site/technical.json
           TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M %Z' > _site/updated.txt
           echo '--- 明细 ---'
           wc -c _site/index.html _site/cards/index.html _site/news.csv

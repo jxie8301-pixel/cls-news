@@ -13,9 +13,9 @@ const HEADERS = ['新闻发布时间', '涉及股票', '同篇其他股票', '�
   '股票代码', '文章链接', '调研结论'];
 
 // 网页表格用的列（把 9 个指标并成两列，便于阅读）
-const HTML_HEADERS = ['新闻发布时间', '涉及股票', '前缀类型', '新闻标题', '发布后表现', '当日行情', '换手率', '量较前日', '调研结论'];
+const HTML_HEADERS = ['新闻发布时间', '涉及股票', '前缀类型', '新闻标题', '发布后表现', '当日行情', '换手率', '量较前日', '调研结论', '技术面结论'];
 // 发布时间列要能放下一整行日期（否则会在“2026-09-12”中间断开），所以在窄屏适配下也有足够宽度
-const HTML_COL_WIDTHS = [11, 10, 6, 12, 9, 9, 6, 6, 31];
+const HTML_COL_WIDTHS = [11, 9, 5, 9, 7, 8, 5, 5, 21, 20];
 
 function pct(v) { return v === null || v === undefined ? '' : (v > 0 ? '+' : '') + Number(v).toFixed(2) + '%'; }
 function num(v, d) { return v === null || v === undefined ? '' : Number(v).toFixed(d === undefined ? 2 : d); }
@@ -109,13 +109,11 @@ function esc(v) {
 const RESEARCH_LABEL_RE = /(题材|估值(?:（截至[^）]+）)?|未来三个月潜力|目前大事|未来三个月|股东动向)：/g;
 const RESEARCH_RISK_RE = /(利润同比下滑|营收承压|盈利为负\/PE失真|估值较高|负面公告事项|退市风险)/g;
 const RESEARCH_EVENT_RE = /(重大资产重组|重大合同|控制权变更|发行股份|收购|重组|中标|立案|行政处罚|诉讼|股权质押|股份质押|解除限售|限售股|增减持|增持|减持|回购)/g;
+// 技术面结论的标签与风险词（下降/破位/偏空类内容标红）
+const TECH_LABEL_RE = /(趋势|位置|量能|关键位|倾向)：/g;
+const TECH_RISK_RE = /(下降趋势|下降末段|破位|跌破|假突破|偏空|超买|放量下跌|放量滞涨|失守|转弱|受制于|区间震荡)/g;
 
-function highlightedResearchValue(label, value) {
-  const majorLine = label === '目前大事' && RESEARCH_EVENT_RE.test(value) ||
-    label === '股东动向' && !/未检索到|待下一轮/.test(value) && RESEARCH_EVENT_RE.test(value);
-  RESEARCH_EVENT_RE.lastIndex = 0;
-  if (majorLine) return '<span class="research-impact">' + esc(value) + '</span>';
-  const re = label === '未来三个月潜力' ? RESEARCH_RISK_RE : label === '未来三个月' ? RESEARCH_EVENT_RE : null;
+function splitHighlight(value, re) {
   if (!re) return esc(value);
   re.lastIndex = 0;
   return String(value).split(re).map(function (part, i) {
@@ -123,18 +121,39 @@ function highlightedResearchValue(label, value) {
   }).join('');
 }
 
-function researchHtml(value) {
+/** 把「标签：内容」多行文本按标签切成分项，标签加粗，内容可自定义高亮。 */
+function labelledHtml(value, labelRe, render) {
   const source = String(value || '—').replace(/\r?\n/g, ' ').trim();
   const fields = [];
-  RESEARCH_LABEL_RE.lastIndex = 0;
+  labelRe.lastIndex = 0;
   let match;
-  while ((match = RESEARCH_LABEL_RE.exec(source)) !== null) fields.push({ label: match[1], index: match.index, start: RESEARCH_LABEL_RE.lastIndex });
+  while ((match = labelRe.exec(source)) !== null) fields.push({ label: match[1], index: match.index, start: labelRe.lastIndex });
   if (!fields.length) return esc(source);
   return fields.map(function (field, i) {
     const end = i + 1 < fields.length ? fields[i + 1].index : source.length;
     const text = source.slice(field.start, end).replace(/^[\s。]+|[\s。]+$/g, '');
-    return '<div class="research-item"><strong class="research-key">' + esc(field.label) + '：</strong><span>' + highlightedResearchValue(field.label, text) + '</span></div>';
+    return '<div class="research-item"><strong class="research-key">' + esc(field.label) + '：</strong><span>' + render(field.label, text) + '</span></div>';
   }).join('');
+}
+
+function highlightedResearchValue(label, value) {
+  const majorLine = label === '目前大事' && RESEARCH_EVENT_RE.test(value) ||
+    label === '股东动向' && !/未检索到|待下一轮/.test(value) && RESEARCH_EVENT_RE.test(value);
+  RESEARCH_EVENT_RE.lastIndex = 0;
+  if (majorLine) return '<span class="research-impact">' + esc(value) + '</span>';
+  const re = label === '未来三个月潜力' ? RESEARCH_RISK_RE : label === '未来三个月' ? RESEARCH_EVENT_RE : null;
+  return splitHighlight(value, re);
+}
+
+function researchHtml(value) {
+  return labelledHtml(value, RESEARCH_LABEL_RE, highlightedResearchValue);
+}
+
+function technicalHtml(value) {
+  return labelledHtml(value, TECH_LABEL_RE, function (label, text) {
+    if (label === '倾向' && /偏空/.test(text)) return '<span class="research-impact">' + esc(text) + '</span>';
+    return splitHighlight(text, label === '趋势' || label === '量能' ? TECH_RISK_RE : null);
+  });
 }
 
 const CSS_BASE = "body{font-family:'Microsoft YaHei',system-ui,sans-serif;margin:24px;color:#1c1c1e;background:#fafafa}h1{font-size:20px;margin:0 0 6px}.meta{color:#666;font-size:13px;margin-bottom:16px}.meta a{white-space:nowrap}.hint{color:#888;font-size:12.5px}table{border-collapse:collapse;width:100%;background:#fff;font-size:13px;table-layout:fixed}th,td{border:1px solid #e5e5e5;padding:8px 10px;vertical-align:top;text-align:left;overflow-wrap:anywhere;word-break:break-word}th{background:#f2f3f5;position:sticky;top:0;z-index:2}td.t{white-space:normal;color:#555;font-variant-numeric:tabular-nums}td.txt{line-height:1.6;white-space:pre-wrap}td.src{white-space:nowrap;color:#888;font-size:12px}.pf{display:inline-block;background:#fff1e6;color:#c2410c;border:1px solid #ffd7bd;border-radius:3px;padding:1px 6px;white-space:nowrap}.pl{display:inline-block;background:#eef4fb;color:#1257a8;border:1px solid #cfe0f2;border-radius:3px;padding:1px 6px;white-space:nowrap;font-size:12px;margin:0 3px 2px 0}a{color:#1257a8;text-decoration:none}a:hover{text-decoration:underline}.tw{background:#fff}" ;
@@ -150,7 +169,7 @@ const CSS_MOBILE_CARDS = "@media (max-width:760px){html,body{max-width:100%;over
 
 const BAR_CSS = ".bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 12px}.bar input[type=search]{flex:1 1 240px;min-width:0;font:inherit;font-size:13px;padding:7px 10px;border:1px solid #e5e5e5;border-radius:7px;background:#fff;color:#1c1c1e}.bar select{font:inherit;font-size:13px;padding:7px 10px;border:1px solid #e5e5e5;border-radius:7px;background:#fff;color:#1c1c1e;max-width:220px}.cnt{color:#888;font-size:12px;white-space:nowrap}@media (max-width:760px){.bar input[type=search]{flex:1 1 100%}.bar select{flex:1 1 40%}}";
 
-const EXTRA_CSS = "td.perf,td.day{font-variant-numeric:tabular-nums;font-size:12.5px;line-height:1.7;color:#3b4149}td.turn,td.vol{font-variant-numeric:tabular-nums;font-size:12.5px;font-weight:600}td.research{font-size:12.5px;line-height:1.7;color:#3b4149}.research-item{display:block;margin:0 0 5px}.research-item:last-child{margin-bottom:0}.research-key{font-weight:700;color:#20252b}.research-impact{color:#c62828;font-weight:700}.v-green{color:#0f9d58}.v-blue{color:#1a73e8}.v-red{color:#d93025}.up-strong{color:#d93025;font-weight:600}.up-limit{color:#8b0000;font-weight:700}@media (max-width:760px){td[data-label=\"发布后表现\"]{order:3}td[data-label=\"当日行情\"]{order:4}td[data-label=\"换手率\"]{order:5}td[data-label=\"量较前日\"]{order:6}td[data-label=\"调研结论\"]{order:7;padding-top:7px}td[data-label=\"新闻发布时间\"]{order:8}td[data-label=\"前缀类型\"]{order:9}.research-item{margin-bottom:7px}}";
+const EXTRA_CSS = "td.perf,td.day{font-variant-numeric:tabular-nums;font-size:12.5px;line-height:1.7;color:#3b4149}td.turn,td.vol{font-variant-numeric:tabular-nums;font-size:12.5px;font-weight:600}td.research,td.tech{font-size:12.5px;line-height:1.7;color:#3b4149}.research-item{display:block;margin:0 0 5px}.research-item:last-child{margin-bottom:0}.research-key{font-weight:700;color:#20252b}.research-impact{color:#c62828;font-weight:700}.v-green{color:#0f9d58}.v-blue{color:#1a73e8}.v-red{color:#d93025}.up-strong{color:#d93025;font-weight:600}.up-limit{color:#8b0000;font-weight:700}@media (max-width:760px){td[data-label=\"发布后表现\"]{order:3}td[data-label=\"当日行情\"]{order:4}td[data-label=\"换手率\"]{order:5}td[data-label=\"量较前日\"]{order:6}td[data-label=\"调研结论\"]{order:7;padding-top:7px}td[data-label=\"技术面结论\"]{order:8;padding-top:7px}td[data-label=\"新闻发布时间\"]{order:9}td[data-label=\"前缀类型\"]{order:10}.research-item{margin-bottom:7px}}";
 
 /**
  * opts.layout: 'table'（默认，任何屏幕都保持表格，窄屏横向滚动）| 'cards'（窄屏折叠成卡片）
@@ -187,6 +206,7 @@ function toHtml(rows, meta, opts) {
       '<td class=' + Q + 'turn ' + turnLevel(r.turnover) + Q + ' data-label=' + Q + '换手率' + Q + '>' + esc(turnText(r)) + '</td>' +
       '<td class=' + Q + 'vol ' + volLevel(r.volRatioPct) + Q + ' data-label=' + Q + '量较前日' + Q + '>' + esc(volText(r)) + '</td>' +
       '<td class=' + Q + 'research' + Q + ' data-label=' + Q + '调研结论' + Q + '>' + researchHtml(r.researchConclusion) + '</td>' +
+      '<td class=' + Q + 'tech' + Q + ' data-label=' + Q + '技术面结论' + Q + '>' + technicalHtml(r.technicalConclusion) + '</td>' +
       '</tr>';
   }).join('\n');
   const toolbar = [

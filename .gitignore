@@ -1,9 +1,11 @@
 # 本地运行产物
 out/
+reports/
 data/news.json
 data/pools/
 data/watchlist.json
 data/research.json
+data/technical.json
 
 # 含口令的本地配置
 config.json
