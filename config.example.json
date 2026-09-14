@@ -3,8 +3,8 @@
   "accessToken": "",
   "refreshMinutes": 10,
   "schedulePolicy": true,
-  "days": 7,
-  "concurrency": 12,
+  "days": 1,
+  "concurrency": 4,
   "requestDelayMs": 0,
   "syncPoolsOnStart": true,
   "constituentPageSize": 100,
@@ -22,9 +22,7 @@
     "数据研选",
     "研选",
     "九点特供",
-    "公告全知道",
-    "解读龙虎榜",
-    "龙虎榜"
+    "公告全知道"
   ],
   "offlineSample": false
 }
