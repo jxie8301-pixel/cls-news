@@ -72,7 +72,7 @@ jobs:
           WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
         run: |
           set +e
-          node src/cli.js --pool all-a --days 7 --site-links
+          node src/cli.js --pool all-a --site-links
           code=$?
           set -e
           if [ "$code" = "3" ]; then
