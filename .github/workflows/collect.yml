@@ -69,10 +69,12 @@ jobs:
       - name: 准备配置与数据目录
         run: |
           cp config.example.json config.json
-          mkdir -p data
+          mkdir -p data out
           # 继承上一次 Pages 发布的调研/技术面缓存，避免每轮全市场重新请求
           curl -fsSL --retry 2 https://jxie8301-pixel.github.io/cls-news-dashboard/research.json  -o data/research.json  || true
           curl -fsSL --retry 2 https://jxie8301-pixel.github.io/cls-news-dashboard/technical.json -o data/technical.json || true
+          # 拉回上一轮发布的 status.json（VIP 哨兵据此读 lastVipCtime 判断有无新 VIP 新闻）
+          curl -fsSL --retry 2 https://jxie8301-pixel.github.io/cls-news-dashboard/status.json    -o out/status.json     || true
 
       # 从 data 分支取回上一轮的「已推送记录」，实现跨轮去重（B1）
       - name: 取回已推送记录 (data 分支)
@@ -86,13 +88,28 @@ jobs:
           fi
 
       - name: 抓取沪深A股目标栏目新闻 + 企业微信推送（只跑 all-a 池）
+        id: collect
         env:
           TZ: Asia/Shanghai
           WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
-        run: node src/cli.js --pool all-a --days 7 --site-links
+        run: |
+          set +e
+          node src/cli.js --pool all-a --days 7 --site-links
+          code=$?
+          set -e
+          if [ "$code" = "3" ]; then
+            echo "skipped=true" >> "$GITHUB_OUTPUT"
+            echo "VIP 哨兵：无新的带个股 VIP 新闻，本轮跳过发布。"
+            exit 0
+          elif [ "$code" != "0" ]; then
+            echo "抓取失败，退出码 $code"
+            exit $code
+          fi
+          echo "skipped=false" >> "$GITHUB_OUTPUT"
 
       # 把更新后的 pushed.json 提交回 data 分支（孤立分支，只存这一个文件）
       - name: 保存已推送记录 (data 分支)
+        if: steps.collect.outputs.skipped != 'true'
         run: |
           if [ ! -f data/pushed.json ]; then echo "无 pushed.json，跳过"; exit 0; fi
           git config user.name  "github-actions[bot]"
@@ -113,6 +130,7 @@ jobs:
           git checkout -
 
       - name: 组装发布目录
+        if: steps.collect.outputs.skipped != 'true'
         run: |
           mkdir -p _site/cards
           cp out/cls-news-latest.html _site/index.html
@@ -125,15 +143,22 @@ jobs:
           TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M %Z' > _site/updated.txt
 
       - uses: actions/configure-pages@v5
+        if: steps.collect.outputs.skipped != 'true'
         with:
           enablement: true
       - uses: actions/upload-pages-artifact@v3
+        if: steps.collect.outputs.skipped != 'true'
         with:
           path: _site
+
+    outputs:
+      skipped: ${{ steps.collect.outputs.skipped }}
 
   # ── 部署到 GitHub Pages ─────────────────────────────────────
   deploy:
     needs: build
+    # 哨兵跳过本轮时不部署（沿用上一版 Pages）
+    if: needs.build.outputs.skipped != 'true'
     runs-on: ubuntu-latest
     environment:
       name: github-pages

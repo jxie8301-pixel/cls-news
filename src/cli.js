@@ -37,6 +37,37 @@ function siteLinks() { return process.argv.includes('--site-links'); }
   const limit = parseInt(arg('limit', 0), 10) || 0;
   const wantExportOnly = process.argv.includes('--export');
 
+  // ── VIP 哨兵：全市场抓取前先看 VIP 列表有没有「新的、且带相关个股」的新闻 ──
+  // 没有新的 → 本轮完全跳过（退出码 3，workflow 据此不发布）。
+  // 去重状态：status.json 的 lastVipCtime（上一轮已处理到的 VIP 最新发布时间）。
+  // --no-gate 可跳过此哨兵（本地调试用）；--export 模式不做哨兵。
+  let curVipMaxCtime = 0;
+  if (!wantExportOnly && !process.argv.includes('--no-gate')) {
+    try {
+      const statusPath = path.join(report.OUT_DIR, 'status.json');
+      let lastVipCtime = 0;
+      try {
+        const st = JSON.parse(fs.readFileSync(statusPath, 'utf8'));
+        lastVipCtime = Number(st.lastVipCtime || 0);
+      } catch (_) { /* 首次运行无 status.json */ }
+
+      const vipItems = await cls.fetchVipArticles({});
+      const withStock = vipItems.filter(function (it) { return cls.vipHasStock(it); });
+      curVipMaxCtime = withStock.reduce(function (mx, it) { return Math.max(mx, Number(it.ctime || 0)); }, 0);
+
+      console.log('VIP 哨兵：列表 ' + vipItems.length + ' 条 ｜ 带个股 ' + withStock.length + ' 条 ｜ 最新ctime ' + curVipMaxCtime + ' ｜ 上轮 ' + lastVipCtime);
+
+      if (!curVipMaxCtime || curVipMaxCtime <= lastVipCtime) {
+        console.log('  ⏭  无新的带个股 VIP 新闻，本轮跳过抓取与发布。');
+        process.exit(3);   // workflow 据此跳过后续步骤
+      }
+      console.log('  ✅ 发现新的带个股 VIP 新闻，继续全市场抓取。');
+    } catch (e) {
+      // 哨兵异常时保守放行（宁可多抓一轮，也不因判断失败而漏更新）
+      console.log('  ⚠️  VIP 哨兵异常，保守继续抓取：' + (e && e.message ? e.message : e));
+    }
+  }
+
   if (!wantExportOnly && cfg.syncPoolsOnStart !== false && !process.argv.includes('--no-sync')) {
     const synced = await collectMod.syncPools({});
     synced.forEach(function (s) {
@@ -145,6 +176,12 @@ function siteLinks() { return process.argv.includes('--site-links'); }
     poolLabel: meta.poolLabel,
     days: days,
     rows: rows.length,
+    // VIP 哨兵去重：本轮处理到的 VIP 最新发布时间；下一轮据此判断有无新 VIP 新闻。
+    // 若本轮未走哨兵（curVipMaxCtime=0），保留上一轮的值不回退。
+    lastVipCtime: curVipMaxCtime || (function () {
+      try { return Number(JSON.parse(fs.readFileSync(statusPath, 'utf8')).lastVipCtime || 0); }
+      catch (_) { return 0; }
+    })(),
   }, null, 2), 'utf8');
   console.log('  ' + statusPath + '  （发布状态）');
 

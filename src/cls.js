@@ -235,6 +235,34 @@ async function fetchStockArticles(code, { sinceSec, maxPages = 60, onPage } = {}
   return out.filter((it) => it.ctime >= cutoff);
 }
 
+/* ------------------------------------------------------- VIP 推荐列表 */
+
+/**
+ * 抓取财联社 VIP 推荐文章列表（首页最新一批，约 15 条）。
+ * 接口：GET https://www.cls.cn/featured/v2/home/recommend/article
+ *   参数：last_time（游标，默认当前时间秒）、refresh_Type=1
+ * 返回原始 item 数组（含 id, title, brief, ctime, type_name, related_stock 等）。
+ */
+async function fetchVipArticles({ lastTime } = {}) {
+  const body = await api('/featured/v2/home/recommend/article', {
+    last_time: String(lastTime || Math.floor(Date.now() / 1000)),
+    refresh_Type: '1',
+  });
+  const data = body && body.data;
+  return Array.isArray(data) ? data : [];
+}
+
+/**
+ * 判断一条 VIP item 是否「有相关个股」（ETF 不算）。
+ * related_stock 形如 [{ market: '主板', count: 2 }, ...]。
+ */
+function vipHasStock(item) {
+  const rs = item && item.related_stock;
+  if (!Array.isArray(rs)) return false;
+  const stockMarkets = new Set(['主板', '创业板', '科创板', '北交所']);
+  return rs.some((s) => s && stockMarkets.has(s.market) && Number(s.count || 0) > 0);
+}
+
 /* ----------------------------------------------------------- 正文抓取 */
 
 function extractContentDiv(html) {
@@ -370,6 +398,8 @@ module.exports = {
   fetchIndexConstituents,
   fetchAllStocks,
   fetchStockArticles,
+  fetchVipArticles,
+  vipHasStock,
   fetchArticleText,
   extractContentDiv,
   htmlToText,
