@@ -1,0 +1,24 @@
+name: 保活 commit（每月第一个周日）
+
+on:
+  schedule:
+    # 每月 1~7 日中的周日 00:00 UTC = 北京时间 08:00
+    # 即"每月第一个周日早上 8 点"提交空 commit，防止 GitHub 因无活动暂停 schedule。
+    - cron: '0 0 1-7 * 0'
+  workflow_dispatch:  # 支持手动触发测试
+
+permissions:
+  contents: write
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 提交保活 commit
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git commit --allow-empty -m "chore: keepalive $(date '+%Y-%m-%d') [skip ci]"
+          git push origin master
+          echo "保活 commit 已提交：$(date '+%Y-%m-%d %H:%M %Z')"
