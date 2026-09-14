@@ -24,36 +24,18 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # ── 门控：按刷新节奏决定本轮是否真的抓取 ──────────────────────
+  # ── 门控（已停用时段判断）────────────────────────────────────
+  # 原按交易时段决定是否抓取的逻辑已停用：现在每个触发都放行进入 build，
+  # 真正「抓不抓」由 build 内的 VIP 哨兵决定（有新的带个股 VIP 新闻才全市场抓取，
+  # 否则本轮跳过不发布）。GitHub Actions 每次换出口 IP，不存在 IP 被封问题。
   gate:
     runs-on: ubuntu-latest
     outputs:
       run: ${{ steps.decide.outputs.run }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-      - name: 判断本轮是否需要刷新
+      - name: 总是放行（交由 VIP 哨兵门控）
         id: decide
-        env:
-          TZ: Asia/Shanghai
-        run: |
-          if [ "${{ github.event_name }}" != "schedule" ]; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
-            echo "非定时触发（${{ github.event_name }}），直接执行。"
-            exit 0
-          fi
-          set +e
-          node src/schedule.js --at now
-          code=$?
-          set -e
-          if [ "$code" = "3" ]; then
-            echo "run=false" >> "$GITHUB_OUTPUT"
-            echo "本轮无需刷新，跳过。"
-          else
-            echo "run=true" >> "$GITHUB_OUTPUT"
-          fi
+        run: echo "run=true" >> "$GITHUB_OUTPUT"
 
   # ── 抓取 + 推送 + 组装发布目录 ───────────────────────────────
   build:
