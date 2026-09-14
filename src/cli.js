@@ -7,6 +7,7 @@ const report = require('./report.js');
 const cls = require('./cls.js');
 const research = require('./research.js');
 const technical = require('./technical.js');
+const notify = require('./notify.js');
 
 function arg(name, fallback) {
   const i = process.argv.indexOf('--' + name);
@@ -146,4 +147,12 @@ function siteLinks() { return process.argv.includes('--site-links'); }
     rows: rows.length,
   }, null, 2), 'utf8');
   console.log('  ' + statusPath + '  （发布状态）');
+
+  // 企业微信推送：对本轮命中、未推送过的文章推送（--no-push 跳过；--dry-run-push 只打印不发）
+  if (!process.argv.includes('--no-push')) {
+    await notify.pushNew(rows, {
+      config: cfg,
+      dryRun: process.argv.includes('--dry-run-push'),
+    });
+  }
 })().catch(function (e) { console.error('运行失败:', e); process.exit(1); });

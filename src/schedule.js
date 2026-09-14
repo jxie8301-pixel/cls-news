@@ -34,7 +34,7 @@ const INTERVAL_MINUTES = {
   closed: 360, // 非交易日
 };
 
-const STATUS_URL_DEFAULT = 'https://yunqingzou-bit.github.io/cls-news-dashboard/status.json';
+const STATUS_URL_DEFAULT = 'https://jxie8301-pixel.github.io/cls-news-dashboard/status.json';
 
 function pad(n) {
   return String(n).padStart(2, '0');

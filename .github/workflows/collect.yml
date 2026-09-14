@@ -1,17 +1,17 @@
-name: 抓取并发布到 Pages
+name: 抓取 + 企业微信推送 + 发布 Pages
 
 on:
   push:
     branches: [main, master]
   workflow_dispatch:
   schedule:
-    # 每 10 分钟触发一次（UTC），刻意避开整点这个最拥挤的槽位。
-    # 是否真的抓取由 src/schedule.js 按刷新节奏判断：
+    # 每 10 分钟触发一次（UTC），刻意避开整点最拥挤的槽位。
+    # 是否真的抓取由 src/schedule.js 判断：
     #   交易日 07:00-16:00 -> 每 10 分钟（这一档只要触发就抓取）
     #   交易日 其他时段     -> 每 2 小时
     #   非交易日            -> 每 6 小时
-    # 交易日用上证指数当日日K核对，A 股节假日自动按非交易日处理。
-    # 注意：schedule 在平台繁忙时会被延后，实际触发间隔可能长于 10 分钟。
+    # 交易日用上证指数当日日K核对，A股节假日自动按非交易日处理。
+    # 注意：schedule 在平台繁忙时会被延后，实际间隔可能长于 10 分钟。
     - cron: '4,14,24,34,44,54 * * * *'
 
 permissions:
@@ -24,19 +24,20 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # ── 门控：按刷新节奏决定本轮是否真的抓取 ──────────────────────
   gate:
     runs-on: ubuntu-latest
     outputs:
       run: ${{ steps.decide.outputs.run }}
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-
       - name: 判断本轮是否需要刷新
         id: decide
+        env:
+          TZ: Asia/Shanghai
         run: |
           if [ "${{ github.event_name }}" != "schedule" ]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
@@ -44,80 +45,93 @@ jobs:
             exit 0
           fi
           set +e
-          node src/schedule.js --check
+          node src/schedule.js --at now
           code=$?
           set -e
           if [ "$code" = "3" ]; then
             echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "本轮无需刷新，跳过。"
           else
             echo "run=true" >> "$GITHUB_OUTPUT"
           fi
 
+  # ── 抓取 + 推送 + 组装发布目录 ───────────────────────────────
   build:
     needs: gate
     if: needs.gate.outputs.run == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
 
-      - name: 准备配置
+      - name: 准备配置与数据目录
         run: |
           cp config.example.json config.json
           mkdir -p data
-          curl -fsSL --retry 2 https://yunqingzou-bit.github.io/cls-news-dashboard/research.json -o data/research.json || true
-          curl -fsSL --retry 2 https://yunqingzou-bit.github.io/cls-news-dashboard/technical.json -o data/technical.json || true
+          # 继承上一次 Pages 发布的调研/技术面缓存，避免每轮全市场重新请求
+          curl -fsSL --retry 2 https://jxie8301-pixel.github.io/cls-news-dashboard/research.json  -o data/research.json  || true
+          curl -fsSL --retry 2 https://jxie8301-pixel.github.io/cls-news-dashboard/technical.json -o data/technical.json || true
 
-      - name: 抓取（只跑沪深A股池，避免把个人自选股带进公开页面）
+      # 从 data 分支取回上一轮的「已推送记录」，实现跨轮去重（B1）
+      - name: 取回已推送记录 (data 分支)
+        run: |
+          git fetch origin data --depth 1 || true
+          if git cat-file -e origin/data:pushed.json 2>/dev/null; then
+            git show origin/data:pushed.json > data/pushed.json
+            echo "已取回 pushed.json"
+          else
+            echo "data 分支暂无 pushed.json，首次运行。"
+          fi
+
+      - name: 抓取沪深A股目标栏目新闻 + 企业微信推送（只跑 all-a 池）
         env:
           TZ: Asia/Shanghai
+          WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
         run: node src/cli.js --pool all-a --days 7 --site-links
 
-      - name: Stockbee 动量爆发研究（近三个月 + T+1 ~ T+5 前瞻收益）
-        env:
-          TZ: Asia/Shanghai
+      # 把更新后的 pushed.json 提交回 data 分支（孤立分支，只存这一个文件）
+      - name: 保存已推送记录 (data 分支)
         run: |
-          mkdir -p out
-          # 继承上一次发布的数据：若已覆盖最新交易日，脚本会跳过抓取、只重出页面，避免每轮都全市场重扫
-          curl -fsSL --retry 2 https://yunqingzou-bit.github.io/cls-news-dashboard/stockbee.json -o out/stockbee.json || true
-          node src/stockbee.js --months 3 --pool all-a --skip-if-fresh --no-cache
+          if [ ! -f data/pushed.json ]; then echo "无 pushed.json，跳过"; exit 0; fi
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          tmp=$(mktemp -d)
+          cp data/pushed.json "$tmp/pushed.json"
+          git fetch origin data --depth 1 || true
+          if git show-ref --verify --quiet refs/remotes/origin/data; then
+            git checkout -B data origin/data
+          else
+            git checkout --orphan data
+            git rm -rf . >/dev/null 2>&1 || true
+          fi
+          cp "$tmp/pushed.json" pushed.json
+          git add pushed.json
+          git commit -m "update pushed.json [skip ci]" || echo "无变化，跳过提交"
+          git push origin data
+          git checkout -
 
       - name: 组装发布目录
         run: |
-          mkdir -p _site/cards _site/stockbee
+          mkdir -p _site/cards
           cp out/cls-news-latest.html _site/index.html
           cp out/cls-news-cards.html  _site/cards/index.html
           cp out/cls-news-latest.csv  _site/news.csv
           cp out/cls-news-latest.json _site/news.json
           cp out/status.json          _site/status.json
-          cp data/research.json _site/research.json
-          cp data/technical.json _site/technical.json
-          if [ -f out/stockbee/index.html ]; then
-            cp out/stockbee/index.html _site/stockbee/index.html
-            cp out/stockbee.csv        _site/stockbee/stockbee.csv
-            cp out/stockbee.json       _site/stockbee.json
-            cp out/stockbee.json       _site/stockbee/stockbee.json
-          else
-            echo 'WARN: 本轮未生成 stockbee，沿用线上上一版，避免部署把它冲掉'
-            curl -fsSL --retry 2 https://yunqingzou-bit.github.io/cls-news-dashboard/stockbee/index.html -o _site/stockbee/index.html || true
-            curl -fsSL --retry 2 https://yunqingzou-bit.github.io/cls-news-dashboard/stockbee/stockbee.json -o _site/stockbee/stockbee.json || true
-            curl -fsSL --retry 2 https://yunqingzou-bit.github.io/cls-news-dashboard/stockbee/stockbee.csv -o _site/stockbee/stockbee.csv || true
-          fi
+          cp data/research.json  _site/research.json  || true
+          cp data/technical.json _site/technical.json || true
           TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M %Z' > _site/updated.txt
-          echo '--- 明细 ---'
-          wc -c _site/index.html _site/cards/index.html _site/news.csv _site/stockbee/index.html
 
       - uses: actions/configure-pages@v5
         with:
           enablement: true
-
       - uses: actions/upload-pages-artifact@v3
         with:
           path: _site
 
+  # ── 部署到 GitHub Pages ─────────────────────────────────────
   deploy:
     needs: build
     runs-on: ubuntu-latest
