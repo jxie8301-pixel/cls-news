@@ -13,6 +13,7 @@
   "research": { "enabled": true, "refreshHours": 24, "concurrency": 5 },
   "technical": { "enabled": true, "refreshHours": 24, "concurrency": 2, "requestDelayMs": 150, "maxPerRun": 150 },
   "backup": { "enabled": true, "dir": "", "keepDays": 30, "secondDir": "" },
+  "notify": { "enabled": true },
   "indexPools": [],
   "prefixes": [
      "盘中宝",

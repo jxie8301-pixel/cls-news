@@ -185,11 +185,14 @@ function siteLinks() { return process.argv.includes('--site-links'); }
   }, null, 2), 'utf8');
   console.log('  ' + statusPath + '  （发布状态）');
 
-  // 企业微信推送：对本轮命中、未推送过的文章推送（--no-push 跳过；--dry-run-push 只打印不发）
-  if (!process.argv.includes('--no-push')) {
+  // 企业微信推送开关：config.notify.enabled=false 或 --no-push 时关闭；--dry-run-push 只打印不发。
+  const notifyEnabled = !cfg.notify || cfg.notify.enabled !== false;
+  if (notifyEnabled && !process.argv.includes('--no-push')) {
     await notify.pushNew(rows, {
       config: cfg,
       dryRun: process.argv.includes('--dry-run-push'),
     });
+  } else {
+    console.log('  微信推送已关闭（config.notify.enabled=false 或 --no-push）');
   }
 })().catch(function (e) { console.error('运行失败:', e); process.exit(1); });
