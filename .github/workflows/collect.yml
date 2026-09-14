@@ -54,6 +54,21 @@ jobs:
           # 拉回上一轮发布的 status.json（VIP 哨兵据此读 lastVipCtime 判断有无新 VIP 新闻）
           curl -fsSL --retry 2 https://jxie8301-pixel.github.io/cls-news/status.json    -o out/status.json     || true
 
+      # ── 保活：每 50 天提交一次空 commit，防止 GitHub 因无活动暂停 schedule ──
+      - name: 保活 commit（每 50 天一次）
+        run: |
+          LAST=$(git log --format='%ci' -1 | cut -c1-10 || echo "2000-01-01")
+          DAYS=$(( ( $(date +%s) - $(date -d "$LAST" +%s) ) / 86400 ))
+          if [ "$DAYS" -ge 50 ]; then
+            git config user.name  "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git commit --allow-empty -m "chore: keepalive [skip ci]"
+            git push origin master
+            echo "已提交保活 commit（距上次 $DAYS 天）"
+          else
+            echo "距上次提交 $DAYS 天，暂不需要保活"
+          fi
+
       # 从 data 分支取回上一轮的「已推送记录」，实现跨轮去重（B1）
       - name: 取回已推送记录 (data 分支)
         run: |
