@@ -10,7 +10,6 @@ const report = require('./report.js');
 const cls = require('./cls.js');
 const research = require('./research.js');
 const schedule = require('./schedule.js');
-const technical = require('./technical.js');
 
 const ROOT = collectMod.ROOT;
 const PUBLIC_DIR = path.join(ROOT, 'public');
@@ -95,13 +94,6 @@ async function refresh(reason) {
       },
     });
     state.research = { total: rr.total, refreshed: rr.refreshed, cached: rr.cached, errors: rr.errors };
-    const trr = await technical.refresh(allRows, {
-      config: c,
-      onProgress: function (s) {
-        if (s.done === s.total || s.done % 25 === 0) console.log('  技术面 ' + s.done + '/' + s.total + ' ｜ 缓存 ' + s.cached + ' ｜ 失败 ' + s.errors);
-      },
-    });
-    state.technical = { total: trr.total, refreshed: trr.refreshed, cached: trr.cached, errors: trr.errors };
     const range = cls.fmtTime(nowSec - c.days * 86400).slice(0, 10) + ' ~ ' + cls.fmtTime(nowSec).slice(0, 10);
     report.exportAll(allRows, {
       title: '财联社 沪深A股 · 目标栏目新闻',
@@ -267,7 +259,6 @@ function handleRequest(req, res) {
       return r;
     });
     research.attachRows(rows);
-    technical.attachRows(rows);
     const nowSec = Math.floor(Date.now() / 1000);
     return json(res, 200, {
       rows: rows,

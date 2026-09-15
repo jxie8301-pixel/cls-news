@@ -29,9 +29,8 @@ jobs:
         run: |
           cp config.example.json config.json
           mkdir -p data out
-          # 继承上一次 Pages 的调研/技术面缓存，避免每轮全市场重新请求
+          # 继承上一次 Pages 的调研缓存，避免每轮全市场重新请求
           curl -fsSL --retry 2 https://jxie8301-pixel.github.io/cls-news/research.json  -o data/research.json  || true
-          curl -fsSL --retry 2 https://jxie8301-pixel.github.io/cls-news/technical.json -o data/technical.json || true
           curl -fsSL --retry 2 https://jxie8301-pixel.github.io/cls-news/status.json    -o out/status.json     || true
 
       - name: 取回已推送记录 (data 分支)
@@ -93,7 +92,6 @@ jobs:
           cp out/cls-news-latest.json _site/news.json
           cp out/status.json          _site/status.json
           cp data/research.json  _site/research.json  || true
-          cp data/technical.json _site/technical.json || true
           TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M %Z' > _site/updated.txt
 
       - uses: actions/configure-pages@v5

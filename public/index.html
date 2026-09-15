@@ -34,7 +34,7 @@ input[type=search]{width:190px}
 .dot.stale{background:var(--warn)}
 td.perf,td.day{font-variant-numeric:tabular-nums;font-size:12.5px;line-height:1.7;color:#3b4149}
 td.turn,td.vol{font-variant-numeric:tabular-nums;font-size:12.5px;font-weight:600}
-td.research,td.tech{font-size:12.5px;line-height:1.7;color:#3b4149}
+td.research{font-size:12.5px;line-height:1.7;color:#3b4149}
 .research-item{display:block;margin:0 0 5px}
 .research-item:last-child{margin-bottom:0}
 .research-key{font-weight:700;color:#20252b}
@@ -139,7 +139,7 @@ footer{color:var(--dim);font-size:12px;padding:0 20px 30px}
 <div class="wrap">
   <table>
     <colgroup>
-      <col style="width:11%"><col style="width:9%"><col style="width:5%"><col style="width:9%"><col style="width:7%"><col style="width:8%"><col style="width:5%"><col style="width:5%"><col style="width:21%"><col style="width:20%">
+      <col style="width:11%"><col style="width:9%"><col style="width:5%"><col style="width:10%"><col style="width:8%"><col style="width:9%"><col style="width:5%"><col style="width:5%"><col style="width:38%">
     </colgroup>
     <thead><tr>
       <th>新闻发布时间</th>
@@ -151,7 +151,6 @@ footer{color:var(--dim);font-size:12px;padding:0 20px 30px}
       <th>换手率</th>
       <th>量较前日</th>
       <th>调研结论</th>
-      <th>技术面结论</th>
     </tr></thead>
     <tbody id="tb"></tbody>
   </table>
@@ -241,8 +240,6 @@ function highlightedResearchValue(label, value) {
   var re = label === '未来三个月潜力' ? RESEARCH_RISK_RE : label === '未来三个月' ? RESEARCH_EVENT_RE : null;
   return splitHighlight(value, re);
 }
-var TECH_LABEL_RE = /(趋势|位置|量能|关键位|倾向)：/g;
-var TECH_RISK_RE = /(下降趋势|下降末段|破位|跌破|假突破|偏空|超买|放量下跌|放量滞涨|失守|转弱|受制于|区间震荡)/g;
 function splitHighlight(value, re) {
   if (!re) return h(value);
   re.lastIndex = 0;
@@ -266,19 +263,13 @@ function labelledHtml(value, labelRe, render) {
 function researchHtml(value) {
   return labelledHtml(value, RESEARCH_LABEL_RE, highlightedResearchValue);
 }
-function technicalHtml(value) {
-  return labelledHtml(value, TECH_LABEL_RE, function (label, text) {
-    if (label === '倾向' && /偏空/.test(text)) return '<span class="research-impact">' + h(text) + '</span>';
-    return splitHighlight(text, label === '趋势' || label === '量能' ? TECH_RISK_RE : null);
-  });
-}
 
 function render() {
   var q = els.q.value.trim().toLowerCase();
   var list = state.rows.filter(function (r) {
     if (state.prefix && r.prefix.indexOf(state.prefix) !== 0) return false;
     if (!q) return true;
-    return (r.stocks + ' ' + r.title + ' ' + r.text + ' ' + (r.researchConclusion || '') + ' ' + (r.technicalConclusion || '')).toLowerCase().indexOf(q) > -1;
+    return (r.stocks + ' ' + r.title + ' ' + r.text + ' ' + (r.researchConclusion || '')).toLowerCase().indexOf(q) > -1;
   });
   els.empty.style.display = list.length ? 'none' : 'block';
   var html = list.map(function (r) {
@@ -298,7 +289,6 @@ function render() {
       '<td class="turn ' + turnLevel(r.turnover) + '" data-label="换手率">' + h(turnText(r)) + '</td>' +
       '<td class="vol ' + volLevel(r.volRatioPct) + '" data-label="量较前日">' + h(volText(r)) + '</td>' +
       '<td class="research" data-label="调研结论">' + researchHtml(r.researchConclusion) + '</td>' +
-      '<td class="tech" data-label="技术面结论">' + technicalHtml(r.technicalConclusion) + '</td>' +
       '</tr>';
   }).join('');
   els.tb.innerHTML = html;

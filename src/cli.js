@@ -6,7 +6,6 @@ const collectMod = require('./collect.js');
 const report = require('./report.js');
 const cls = require('./cls.js');
 const research = require('./research.js');
-const technical = require('./technical.js');
 const notify = require('./notify.js');
 
 function arg(name, fallback) {
@@ -139,22 +138,6 @@ function siteLinks() { return process.argv.includes('--site-links'); }
     console.log('调研结论：股票 ' + rr.total + ' 只 ｜ 本轮更新 ' + rr.refreshed + ' ｜ 使用缓存 ' + rr.cached + ' ｜ 失败 ' + rr.errors);
   } else {
     research.attachRows(rows);
-  }
-  if (!process.argv.includes('--no-technical')) {
-    let lastTechLog = 0;
-    const tr = await technical.refresh(rows, {
-      config: cfg,
-      onProgress: function (s) {
-        const now = Date.now();
-        if (now - lastTechLog < 1500 && s.done < s.total) return;
-        lastTechLog = now;
-        process.stdout.write('\r技术面 ' + s.done + '/' + s.total + ' ｜ 缓存 ' + s.cached + ' ｜ 失败 ' + s.errors + '   ');
-      },
-    });
-    if (tr.refreshed) console.log('');
-    console.log('技术面结论：股票 ' + tr.total + ' 只 ｜ 本轮更新 ' + tr.refreshed + ' ｜ 使用缓存 ' + tr.cached + ' ｜ 失败 ' + tr.errors + (tr.deferred ? ' ｜ 顺延下轮 ' + tr.deferred + ' 只' : ''));
-  } else {
-    technical.attachRows(rows);
   }
   const meta = {
     title: '财联社 沪深A股 · 目标栏目新闻',

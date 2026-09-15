@@ -11,7 +11,6 @@
   "marketPool": { "enabled": true, "key": "all-a", "name": "沪深A股", "market": "all" },
   "marketPageSize": 200,
   "research": { "enabled": true, "refreshHours": 24, "concurrency": 5 },
-  "technical": { "enabled": true, "refreshHours": 24, "concurrency": 2, "requestDelayMs": 150, "maxPerRun": 150 },
   "backup": { "enabled": true, "dir": "", "keepDays": 30, "secondDir": "" },
   "notify": {
     "enabled": true,
