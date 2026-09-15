@@ -47,13 +47,14 @@ jobs:
         env:
           MINIMAX_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
         run: |
+          # 统一用小写 [minimax] 前缀，方便在 Actions 日志搜索框检索（区分大小写）
           if [ -n "${MINIMAX_API_KEY}" ]; then
-            echo "MINIMAX_API_KEY: 已注入（长度 ${#MINIMAX_API_KEY}）"
-            echo "提示：build 任务只能读「Repository secrets」，读不到 Environment(github-pages) 里的 Secret"
+            echo "[minimax] secret_check: present=yes len=${#MINIMAX_API_KEY}"
+            echo "[minimax] hint: build 只能读 Repository secrets，读不到 Environment(github-pages) secrets"
           else
-            echo "MINIMAX_API_KEY: 为空"
-            echo "请到 Settings → Secrets and variables → Actions → Repository secrets 新增 MINIMAX_API_KEY"
-            echo "注意：只配在 Environment「github-pages」时，本 build 步骤读不到（deploy 才绑定该 Environment）"
+            echo "[minimax] secret_check: present=no"
+            echo "[minimax] hint: 请到 Settings → Secrets → Actions → Repository secrets 配置 MINIMAX_API_KEY"
+            echo "[minimax] hint: 若只配在 Environment github-pages，本 build 步骤读不到"
           fi
 
       - name: 抓取沪深A股目标栏目新闻 + 企业微信推送（只跑 all-a 池）

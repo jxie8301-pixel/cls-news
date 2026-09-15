@@ -179,12 +179,16 @@ function siteLinks() { return process.argv.includes('--site-links'); }
 
   // 企业微信推送开关：config.notify.enabled=false 或 --no-push 时关闭；--dry-run-push 只打印不发。
   const notifyEnabled = !cfg.notify || cfg.notify.enabled !== false;
+  console.log('[minimax] cli before notify enabled=' + notifyEnabled +
+    ' noPush=' + process.argv.includes('--no-push') +
+    ' rows=' + rows.length);
   if (notifyEnabled && !process.argv.includes('--no-push')) {
     await notify.pushNew(rows, {
       config: cfg,
       dryRun: process.argv.includes('--dry-run-push'),
     });
   } else {
+    console.log('[minimax] cli skip notify (disabled or --no-push)');
     console.log('  微信推送已关闭（config.notify.enabled=false 或 --no-push）');
   }
 })().catch(function (e) { console.error('运行失败:', e); process.exit(1); });

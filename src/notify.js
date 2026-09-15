@@ -263,7 +263,13 @@ async function pushNew(rows, opts) {
   const webhook = process.env.WECOM_WEBHOOK || cfg.wecomWebhook || '';
   const dryRun = !!opts.dryRun;
 
+  console.log('[minimax] notify.pushNew enter rows=' + (rows && rows.length) +
+    ' webhook=' + (webhook ? 'yes' : 'no') +
+    ' dryRun=' + dryRun +
+    ' envKeyLen=' + String(process.env.MINIMAX_API_KEY || '').length);
+
   if (!webhook && !dryRun) {
+    console.log('[minimax] notify abort: WECOM_WEBHOOK missing（整段推送含 MiniMax 均跳过）');
     console.log('  [notify] 未配置 WECOM_WEBHOOK，跳过推送');
     return { pushed: 0, skipped: 0, total: 0 };
   }
@@ -276,23 +282,35 @@ async function pushNew(rows, opts) {
   const vipMap = opts.vipMap || await loadVipMap();
   articles = applyVipOverlay(articles, vipMap);
 
+  const already = articles.filter(function (a) { return !!pushedStore.ids[a.id]; }).length;
+  const pending = articles.length - already;
+  console.log('[minimax] notify articles=' + articles.length +
+    ' alreadyPushed=' + already + ' pendingMiniMax=' + pending);
+
   let pushed = 0;
   let skipped = 0;
   for (const a of articles) {
-    if (pushedStore.ids[a.id]) { skipped++; continue; }
+    if (pushedStore.ids[a.id]) {
+      skipped++;
+      continue;
+    }
+
+    console.log('[minimax] will call API for article id=' + a.id +
+      ' stocks=' + (a.stocks && a.stocks.length) +
+      ' title=' + String(a.title || '').slice(0, 40));
 
     let notes = {};
     try {
       notes = await minimax.generateStockNotes(a.title, a.text, a.stocks, cfg);
     } catch (e) {
-      console.error('  [notify] MiniMax 异常，回退题材描述: ' + (e && e.message ? e.message : e));
+      console.error('[minimax] notify exception: ' + (e && e.message ? e.message : e));
       notes = {};
     }
     const noteCount = Object.keys(notes || {}).length;
     if (!noteCount) {
-      console.log('  [notify] 文章 ' + a.id + ' MiniMax 无有效一句话，将回退 research 题材（推送里带(题材)标记）');
+      console.log('[minimax] article ' + a.id + ' no AI notes → fallback theme (题材)');
     } else {
-      console.log('  [notify] 文章 ' + a.id + ' 使用 MiniMax 一句话 ' + noteCount + ' 条');
+      console.log('[minimax] article ' + a.id + ' AI notes=' + noteCount);
     }
 
     const content = formatArticle(a, cache, notes);
@@ -308,10 +326,13 @@ async function pushNew(rows, opts) {
       pushedStore.ids[a.id] = a.ctime || Math.floor(Date.now() / 1000);
       pushed++;
       await sleep(500);
+    } else {
+      console.log('[minimax] wecom send failed for article ' + a.id + '（未写入 pushed，下次仍会重试）');
     }
   }
 
   if (!dryRun) savePushed(pushedStore);
+  console.log('[minimax] notify done pushed=' + pushed + ' skipped=' + skipped + ' total=' + articles.length);
   console.log('  [notify] 推送完成：新增 ' + pushed + ' 条，跳过（已推送）' + skipped + ' 条，本轮文章 ' + articles.length + ' 篇');
   return { pushed: pushed, skipped: skipped, total: articles.length };
 }
