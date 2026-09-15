@@ -10,7 +10,7 @@
  *   4. 按板块分组，以 markdown 推送到企业微信
  *
  * 文本格式示例（msgtype=markdown）：
- *   **[09-15 10:51]【盘中宝】完整标题（不截断）**
+ *   **[09-15 10:51]【盘中宝】**完整标题正文（仅时间+栏目加粗）
  *
  *   > 摘要: 完整摘要（不截断）
  *
@@ -169,6 +169,23 @@ function fmtPushTime(sec) {
 }
 
 /**
+ * 拆出标题开头的 【栏目】 / [栏目]，其余为正文。
+ * 无括号前缀时，用 article.prefix 补成 【prefix】。
+ */
+function splitTitleLead(title, prefixHint) {
+  const t = String(title || '').trim();
+  const m = /^([【\[][^】\]]{1,40}[】\]])\s*/.exec(t);
+  if (m) {
+    return { lead: m[1], rest: t.slice(m[0].length) };
+  }
+  const hint = String(prefixHint || '').trim();
+  if (hint) {
+    return { lead: '【' + hint + '】', rest: t };
+  }
+  return { lead: '', rest: t };
+}
+
+/**
  * @param {object} article
  * @param {object} cache      research 缓存
  * @param {Record<string,string>} notes  MiniMax 一句话 {纯数字code: desc}
@@ -177,10 +194,16 @@ function formatArticle(article, cache, notes) {
   notes = notes || {};
   // 标题/摘要完整展示，不做字数截断或「…」省略（企微 markdown 上限约 4096 字节）
   const title = String(article.title || '').trim();
+  const time = fmtPushTime(article.ctime);
+  const parts = splitTitleLead(title, article.prefix);
+  // 仅加粗「[时间]【栏目】」，正文不加粗
+  const headLine = parts.lead
+    ? ('**' + time + parts.lead + '**' + parts.rest)
+    : ('**' + time + '**' + parts.rest);
 
   const lines = [];
-  // 企业微信 markdown：标题加粗、摘要引用、板块加粗、个股无序列表
-  lines.push('**' + fmtPushTime(article.ctime) + title + '**');
+  // 企业微信 markdown：时间+栏目加粗、摘要引用、板块加粗、个股无序列表
+  lines.push(headLine);
   lines.push('');
   const brief = String(article.text || '').replace(/\s+/g, ' ').trim();
   lines.push('> 摘要: ' + brief);
