@@ -3,7 +3,12 @@
 /**
  * MiniMax 为一篇新闻的目标标的生成「一句话描述」。
  * 仅供 dashboard（GitHub Actions）推送链路使用；零 npm 依赖。
- * 走 OpenAI 兼容：POST {base_url}/chat/completions
+ *
+ * 必须走 Responses API：POST {base_url}/responses
+ *   + tools: [{type: web_search}]
+ *   + tool_choice 强制先联网检索，再总结特色/护城河/题材热点。
+ * /chat/completions 无托管联网，旧实现不会搜索。
+ *
  * 失败/未配置时返回 {}，由 notify 回退到 research 题材描述。
  */
 
@@ -14,8 +19,13 @@ const { URL } = require('node:url');
 const DEFAULT_MODEL = 'MiniMax-M3';
 const DEFAULT_BASE = 'https://api.minimaxi.com/v1';
 
-const PROMPT_TEMPLATE = `你是一名A股投研助理。下面是一条财联社 VIP 新闻，以及该新闻涉及的若干只A股个股。
-请为每只个股写一句话描述，说明「公司主业/产品特点 + 与本条新闻的匹配点」，每条不超过40字，简洁精准，不要编造。
+const PROMPT_TEMPLATE = `你是一名A股短线投研助理。请先对下列每只个股**联网搜索**核实：
+主营/产品卡位、护城河或壁垒（客户/技术/产能/资质等，无把握写“壁垒一般”）、近期相关题材热点与公告要点。
+再结合本条 VIP 新闻，为每只个股写**一句**描述。
+
+句式要求（约 45 字内，三点都要点到，极短）：
+「特色/卡位 + 护城河或壁垒 + 对接本条新闻/当下热点」
+禁止只堆行业词、禁止复述标题、禁止编造未检索到的护城河。
 
 ## 新闻标题
 {title}
@@ -23,13 +33,13 @@ const PROMPT_TEMPLATE = `你是一名A股投研助理。下面是一条财联社
 ## 新闻摘要
 {brief}
 
-## 涉及个股（代码 名称）
+## 涉及个股（代码 名称）——请逐只联网检索后再写
 {stock_lines}
 
 ## 输出要求
-只输出一个 JSON 代码块，键为6位股票代码，值为该股的一句话描述，例如：
+检索并归纳后，只输出一个 JSON 代码块，键为6位股票代码，值为该股一句话，例如：
 \`\`\`json
-{"601208": "覆铜板用特种树脂主力，对接 AI 算力材料升级", "605589": "电子级酚醛/环氧树脂供应商，受益覆铜板迭代"}
+{"301189": "音视频终端切算力服务，交付/客户能力是壁垒，贴合Token工厂与算力通道主题", "300657": "FPC+算力硬件卡位，工厂落地形成先发，受益Token工厂景气"}
 \`\`\`
 不要输出 JSON 以外的任何内容。`;
 
@@ -41,7 +51,10 @@ function loadCfg(config) {
     apiKey: String(apiKey || '').trim(),
     model: n.model || DEFAULT_MODEL,
     baseUrl: String(n.base_url || n.baseUrl || DEFAULT_BASE).replace(/\/$/, ''),
-    timeout: Math.max(10, Number(n.timeout) || 60) * 1000,
+    // 联网搜索更慢，默认 180s
+    timeout: Math.max(30, Number(n.timeout) || 180) * 1000,
+    webSearch: n.web_search !== false && n.webSearch !== false,
+    maxOutputTokens: Number(n.max_output_tokens || n.maxOutputTokens || 4096) || 4096,
   };
 }
 
@@ -50,7 +63,6 @@ function pureCode(code) {
 }
 
 function stripThink(text) {
-  // MiniMax-M3 常在 content 前带 <think>…</think>，干扰 JSON 截取
   return String(text || '')
     .replace(/<think>[\s\S]*?<\/think>/gi, '')
     .replace(/<thinking>[\s\S]*?<\/thinking>/gi, '')
@@ -67,7 +79,6 @@ function extractJson(text) {
       try { return JSON.parse(inner); } catch (_) { /* continue */ }
     }
   }
-  // 从后往前找最后一个完整 JSON 对象，避免思考正文里的 { } 干扰
   const j = text.lastIndexOf('}');
   if (j === -1) return null;
   let depth = 0;
@@ -90,7 +101,6 @@ function extractChatText(data) {
   if (c0) {
     const msg = c0.message || {};
     if (typeof msg.content === 'string') return msg.content;
-    // 部分接口 content 为分段数组
     if (Array.isArray(msg.content)) {
       return msg.content.map(function (b) {
         if (typeof b === 'string') return b;
@@ -102,8 +112,85 @@ function extractChatText(data) {
     if (typeof c0.text === 'string') return c0.text;
   }
   if (typeof data.reply === 'string') return data.reply;
-  if (data.output_text) return String(data.output_text);
   return '';
+}
+
+/** 从 Responses API 响应提取最终文本 */
+function extractResponsesText(data) {
+  if (!data || typeof data !== 'object') return '';
+  const ot = data.output_text;
+  if (typeof ot === 'string' && ot.trim()) return ot.trim();
+  if (Array.isArray(ot)) {
+    const joined = ot.map(String).join('').trim();
+    if (joined) return joined;
+  }
+
+  const parts = [];
+  for (const item of data.output || []) {
+    if (!item || typeof item !== 'object') continue;
+    if (item.type === 'message') {
+      for (const block of item.content || []) {
+        if (block && (block.type === 'output_text' || block.type === 'text') && block.text) {
+          parts.push(block.text);
+        }
+      }
+    } else if ((item.type === 'output_text' || item.type === 'text') && item.text) {
+      parts.push(item.text);
+    }
+  }
+  if (parts.length) return parts.join('').trim();
+
+  const chat = extractChatText(data);
+  if (chat) return chat;
+
+  // 仅有 reasoning 时兜底
+  const reasoning = [];
+  for (const item of data.output || []) {
+    if (item && item.type === 'reasoning') {
+      for (const block of item.content || []) {
+        if (block && block.type === 'reasoning_text' && block.text) reasoning.push(block.text);
+      }
+    }
+  }
+  return reasoning.join('').trim();
+}
+
+/** 收集首轮检索证据，供第二轮不联网收尾 */
+function extractResponsesEvidence(data) {
+  const parts = [];
+  for (const item of (data && data.output) || []) {
+    if (!item || typeof item !== 'object') continue;
+    if (item.type === 'message') {
+      for (const block of item.content || []) {
+        if (!block || typeof block !== 'object') continue;
+        if ((block.type === 'output_text' || block.type === 'text') && block.text) {
+          parts.push(String(block.text).trim());
+        }
+        for (const ann of block.annotations || []) {
+          if (ann && ann.type === 'url_citation') {
+            const cite = [ann.title, ann.url].filter(Boolean).join(' ');
+            const content = String(ann.content || '').slice(0, 800);
+            if (cite || content) parts.push('[来源] ' + (cite + (content ? '\n' + content : '')).trim());
+          }
+        }
+      }
+    } else if (item.type === 'web_search_call') {
+      const action = item.action || {};
+      if (action.query) parts.push('[搜索] ' + action.query);
+      if (Array.isArray(action.queries) && action.queries.length) {
+        parts.push('[搜索] ' + action.queries.filter(Boolean).join('；'));
+      }
+    }
+  }
+  return parts.filter(Boolean).join('\n\n').slice(0, 12000);
+}
+
+function countWebSearchCalls(data) {
+  let n = 0;
+  for (const item of (data && data.output) || []) {
+    if (item && item.type === 'web_search_call') n++;
+  }
+  return n;
 }
 
 function httpPostJson(urlStr, headers, body, timeoutMs) {
@@ -151,31 +238,61 @@ function httpPostJson(urlStr, headers, body, timeoutMs) {
   });
 }
 
+function buildResponsesPayload(cfg, prompt, webSearch) {
+  const payload = {
+    model: cfg.model,
+    input: prompt,
+    max_output_tokens: cfg.maxOutputTokens,
+  };
+  if (webSearch) {
+    payload.tools = [{ type: 'web_search' }];
+    payload.tool_choice = { type: 'web_search' };
+  }
+  return payload;
+}
+
+async function callResponses(cfg, prompt, webSearch) {
+  const data = await httpPostJson(
+    cfg.baseUrl + '/responses',
+    { Authorization: 'Bearer ' + cfg.apiKey },
+    buildResponsesPayload(cfg, prompt, webSearch),
+    cfg.timeout
+  );
+  const br = data && data.base_resp;
+  if (br && Number(br.status_code) !== 0) {
+    throw new Error('业务错误 base_resp=' + JSON.stringify(br));
+  }
+  return data;
+}
+
+function notesFromText(text) {
+  const obj = extractJson(text);
+  if (!obj || typeof obj !== 'object') return null;
+  const out = {};
+  for (const [k, v] of Object.entries(obj)) {
+    const code = pureCode(k);
+    if (code && typeof v === 'string' && v.trim()) out[code] = v.trim();
+  }
+  return Object.keys(out).length ? out : null;
+}
+
 /**
  * @returns {Promise<Record<string,string>>} {纯数字代码: 一句话}
  */
 async function generateStockNotes(title, brief, stocks, config) {
   const cfg = loadCfg(config);
   if (!cfg.enabled) {
-    console.log('  [minimax] 未启用（notify.minimax.enabled=false），跳过');
+    console.log('[minimax] 未启用（notify.minimax.enabled=false），跳过');
     return {};
   }
   if (!cfg.apiKey) {
-    console.log('  [minimax] 未配置 Key：请把 MINIMAX_API_KEY 配在「仓库 Actions secrets」（Repository secrets），');
-    console.log('           不要只放在 Environment(github-pages)——build 任务读不到 Environment Secret');
+    console.log('[minimax] 未配置 Key：请把 MINIMAX_API_KEY 配在 Repository secrets（build 读不到 Environment secrets）');
     return {};
   }
   if (!stocks || !stocks.length) {
-    console.log('  [minimax] 无标的列表，跳过');
+    console.log('[minimax] 无标的列表，跳过');
     return {};
   }
-
-  console.log(
-    '  [minimax] 开始推理：stocks=' + stocks.length +
-    ' keyLen=' + cfg.apiKey.length +
-    ' model=' + cfg.model +
-    ' base=' + cfg.baseUrl
-  );
 
   const stockLines = stocks
     .filter(function (s) { return s && s.code; })
@@ -187,58 +304,59 @@ async function generateStockNotes(title, brief, stocks, config) {
     .replace('{brief}', brief || '')
     .replace('{stock_lines}', stockLines);
 
+  const useSearch = cfg.webSearch;
+  console.log(
+    '[minimax] 开始推理(responses' + (useSearch ? '+web_search强制' : '') + ')：stocks=' +
+    stocks.length + ' keyLen=' + cfg.apiKey.length + ' model=' + cfg.model +
+    ' timeoutMs=' + cfg.timeout
+  );
+
   let data;
   try {
-    data = await httpPostJson(
-      cfg.baseUrl + '/chat/completions',
-      { Authorization: 'Bearer ' + cfg.apiKey },
-      {
-        model: cfg.model,
-        messages: [
-          { role: 'system', content: '你是一名专业的A股投资研究员，严格按用户要求输出 JSON。' },
-          { role: 'user', content: prompt },
-        ],
-        stream: false,
-        temperature: 0.2,
-      },
-      cfg.timeout
-    );
+    data = await callResponses(cfg, prompt, useSearch);
   } catch (e) {
-    console.error('  [minimax] 调用失败: ' + (e && e.message ? e.message : e));
+    console.error('[minimax] 调用失败: ' + (e && e.message ? e.message : e));
     return {};
   }
 
-  // MiniMax 有时 HTTP 200 但业务错误码非 0
-  const br = data && data.base_resp;
-  if (br && Number(br.status_code) !== 0) {
-    console.error('  [minimax] 业务错误 base_resp=' + JSON.stringify(br));
+  const searchCalls = countWebSearchCalls(data);
+  console.log('[minimax] 首轮完成 web_search_calls=' + searchCalls + ' status=' + (data.status || ''));
+
+  let text = extractResponsesText(data);
+  let notes = notesFromText(text);
+
+  // 首轮只搜不写 JSON：回喂证据做不联网收尾（与本地 deepseek/minimax 质证策略一致）
+  if (!notes && useSearch) {
+    console.log('[minimax] 首轮未产出 JSON，发起收尾调用（不联网，回喂检索证据）');
+    const evidence = extractResponsesEvidence(data) || text || '（无额外资料）';
+    const finalizePrompt =
+      prompt +
+      '\n\n=== 你在上一轮联网检索中已获取的资料（请据此直接给出最终 JSON，无需再检索） ===\n' +
+      evidence +
+      '\n\n=== 现在请立即只输出最终 JSON 代码块 ===';
+    try {
+      const data2 = await callResponses(cfg, finalizePrompt, false);
+      text = extractResponsesText(data2) || text;
+      notes = notesFromText(text);
+      console.log('[minimax] 收尾完成 web_search_calls=' + countWebSearchCalls(data2));
+    } catch (e) {
+      console.error('[minimax] 收尾调用失败: ' + (e && e.message ? e.message : e));
+    }
+  }
+
+  if (!notes) {
+    console.error('[minimax] 回复无法解析为有效 JSON，前200字: ' + String(text || '').slice(0, 200));
     return {};
   }
 
-  const text = extractChatText(data);
-  const obj = extractJson(text);
-  if (!obj || typeof obj !== 'object') {
-    console.error('  [minimax] 回复无法解析为 JSON，前200字: ' + String(text || '').slice(0, 200));
-    console.error('  [minimax] raw keys=' + (data ? Object.keys(data).join(',') : 'null'));
-    return {};
-  }
-
-  const out = {};
-  for (const [k, v] of Object.entries(obj)) {
-    const code = pureCode(k);
-    if (code && typeof v === 'string' && v.trim()) out[code] = v.trim();
-  }
-  if (!Object.keys(out).length) {
-    console.error('  [minimax] JSON 已解析但无有效代码键: ' + JSON.stringify(obj).slice(0, 200));
-    return {};
-  }
-  console.log('  [minimax] 一句话描述生成成功：' + Object.keys(out).length + ' 条 → ' + Object.keys(out).join(','));
-  return out;
+  console.log('[minimax] 一句话描述生成成功：' + Object.keys(notes).length + ' 条 → ' + Object.keys(notes).join(','));
+  return notes;
 }
 
 module.exports = {
   loadCfg: loadCfg,
   pureCode: pureCode,
   extractJson: extractJson,
+  extractResponsesText: extractResponsesText,
   generateStockNotes: generateStockNotes,
 };

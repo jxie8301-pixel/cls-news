@@ -18,7 +18,9 @@
       "enabled": true,
       "model": "MiniMax-M3",
       "base_url": "https://api.minimaxi.com/v1",
-      "timeout": 60,
+      "timeout": 180,
+      "web_search": true,
+      "max_output_tokens": 4096,
       "api_key": ""
     }
   },
