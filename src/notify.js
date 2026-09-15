@@ -7,16 +7,15 @@
  *   1. 个股扫描得到文章×股票 rows，按 articleId 聚合成一文一条
  *   2. 用 VIP 列表中同 id 的 title / brief 覆盖推送标题与摘要（个股侧标题摘要不准）
  *   3. 调用 MiniMax 为每只标的生成一句话（独特标签+热点+硬连接+边界）；失败则回退 research 题材
- *   4. 按板块分组推送到企业微信
+ *   4. 按板块分组，以 markdown 推送到企业微信
  *
- * 文本格式示例：
- *   [09-15 10:51]【盘中宝】覆铜板介电性能与耐热可靠性的核心骨架…
+ * 文本格式示例（msgtype=markdown）：
+ *   **[09-15 10:51]【盘中宝】完整标题（不截断）**
  *
- *   摘要:
+ *   > 摘要: 完整摘要（不截断）
  *
- *   主板：
- *    东材科技(601208)-一句话描述
- *    圣泉集团(605589)-一句话描述
+ *   **主板：**
+ *   - **东材科技**(601208)：一句话描述
  *
  * 去重：data/pushed.json（文章 id）
  * webhook：环境变量 WECOM_WEBHOOK > config.wecomWebhook
@@ -176,14 +175,15 @@ function fmtPushTime(sec) {
  */
 function formatArticle(article, cache, notes) {
   notes = notes || {};
-  let title = article.title || '';
-  if (title.length > 50) title = title.slice(0, 50) + '…';
+  // 标题/摘要完整展示，不做字数截断或「…」省略（企微 markdown 上限约 4096 字节）
+  const title = String(article.title || '').trim();
 
   const lines = [];
-  lines.push(fmtPushTime(article.ctime) + title);
+  // 企业微信 markdown：标题加粗、摘要引用、板块加粗、个股无序列表
+  lines.push('**' + fmtPushTime(article.ctime) + title + '**');
   lines.push('');
   const brief = String(article.text || '').replace(/\s+/g, ' ').trim();
-  lines.push('摘要: ' + brief);
+  lines.push('> 摘要: ' + brief);
   lines.push('');
 
   const groups = {};
@@ -195,16 +195,19 @@ function formatArticle(article, cache, notes) {
   Object.keys(groups).forEach(function (b) { if (ordered.indexOf(b) < 0) ordered.push(b); });
 
   for (const board of ordered) {
-    lines.push(board + '：');
+    lines.push('**' + board + '：**');
     for (const s of groups[board]) {
       const code = pureCode(s.code);
-      const tag = code ? s.name + '(' + code + ')' : s.name;
+      const name = s.name || '';
       const ai = (code && notes[code]) || '';
       const fallback = themeOf(cache, s.code) || '';
       const desc = ai || fallback;
-      // 便于在企业微信里区分：AI 成功 vs 题材回退
-      const mark = ai ? '' : (fallback ? '(题材)' : '');
-      lines.push(' ' + tag + '-' + mark + desc);
+      // AI 成功 vs 题材回退：回退用灰色标注
+      const mark = ai ? '' : (fallback ? '<font color="comment">(题材)</font> ' : '');
+      const tag = code
+        ? '**' + name + '**(' + code + ')'
+        : '**' + name + '**';
+      lines.push('- ' + tag + '：' + mark + desc);
     }
     lines.push('');
   }
@@ -213,11 +216,14 @@ function formatArticle(article, cache, notes) {
 
 /* --------------------------------------------------------------- 网络发送 */
 
-function sendWecomText(webhook, content) {
+function sendWecomMarkdown(webhook, content) {
   return new Promise(function (resolve) {
     let u;
     try { u = new URL(webhook); } catch (_) { resolve(false); return; }
-    const body = Buffer.from(JSON.stringify({ msgtype: 'text', text: { content: content } }), 'utf8');
+    const body = Buffer.from(JSON.stringify({
+      msgtype: 'markdown',
+      markdown: { content: content },
+    }), 'utf8');
     const req = https.request(
       {
         hostname: u.hostname,
@@ -321,7 +327,7 @@ async function pushNew(rows, opts) {
       continue;
     }
 
-    const ok = await sendWecomText(webhook, content);
+    const ok = await sendWecomMarkdown(webhook, content);
     if (ok) {
       pushedStore.ids[a.id] = a.ctime || Math.floor(Date.now() / 1000);
       pushed++;
