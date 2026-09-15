@@ -37,13 +37,13 @@ function siteLinks() { return process.argv.includes('--site-links'); }
   const limit = parseInt(arg('limit', 0), 10) || 0;
   const wantExportOnly = process.argv.includes('--export');
 
-  // ── VIP 哨兵：全市场抓取前先看 VIP 列表有没有「新的、且带相关个股」的新闻 ──
-  // 没有新的 → 本轮完全跳过（退出码 3，workflow 据此不发布）。
-  // 去重状态：status.json 的 lastVipIds（上一轮已处理的有效文章 id 集合）。
-  // 过滤规则：同时排除①无相关个股（only 主板/创业板/科创板/北交所）②标题含"玩转ETF"的文章。
-  // --no-gate 可跳过此哨兵（本地调试用）；--export 模式不做哨兵。
-  let curVipIds = [];   // 本轮有效文章 id 列表（用于写回 status.json）
-  if (!wantExportOnly && !process.argv.includes('--no-gate')) {
+  // ── VIP 列表（仅记录，默认不做「有无新增」门控）────────────────
+  // 「要不要抓」由外部 cls-trigger 决定后 workflow_dispatch；本进程被触发后直接抓取。
+  // 仍拉取 VIP 写 lastVipIds 供 status / 推送侧对照。
+  // 仅当显式传入 --gate 时才恢复旧差集逻辑（无新增则 exit 3）；--export 不做。
+  let curVipIds = [];
+  const wantGate = process.argv.includes('--gate');
+  if (!wantExportOnly) {
     try {
       const statusPath = path.join(report.OUT_DIR, 'status.json');
       let lastVipIds = [];
@@ -53,8 +53,6 @@ function siteLinks() { return process.argv.includes('--site-links'); }
       } catch (_) { /* 首次运行无 status.json */ }
 
       const vipItems = await cls.fetchVipArticles({});
-
-      // 过滤：必须有相关个股（ETF 不算）且标题不含"玩转ETF"
       const skipTitleKws = ['玩转ETF'];
       const eligible = vipItems.filter(function (it) {
         if (!cls.vipHasStock(it)) return false;
@@ -62,25 +60,21 @@ function siteLinks() { return process.argv.includes('--site-links'); }
         if (skipTitleKws.some(function (kw) { return title.indexOf(kw) !== -1; })) return false;
         return true;
       });
-
       curVipIds = eligible.map(function (it) { return String(it.id); });
 
-      // 差集：找出本轮有效文章里上轮没有的 id
       const lastIdSet = new Set(lastVipIds);
       const newIds = curVipIds.filter(function (id) { return !lastIdSet.has(id); });
-
-      console.log('VIP 哨兵：列表 ' + vipItems.length + ' 条'
+      console.log('VIP 列表：' + vipItems.length + ' 条'
         + ' ｜ 有效（带个股且非ETF）' + eligible.length + ' 条'
-        + ' ｜ 本轮新增 ' + newIds.length + ' 条'
-        + ' ｜ 上轮已知 ' + lastVipIds.length + ' 条');
+        + ' ｜ 相对上轮新增 ' + newIds.length + ' 条'
+        + (wantGate ? ' ｜ --gate 门控开启' : ' ｜ 外部触发模式（不做差集跳过）'));
 
-      if (newIds.length === 0) {
-        console.log('  ⏭  无新的带个股 VIP 新闻，本轮跳过抓取与发布。');
+      if (wantGate && newIds.length === 0) {
+        console.log('  ⏭  --gate：无新的带个股 VIP 新闻，本轮跳过抓取与发布。');
         process.exit(3);
       }
-      console.log('  ✅ 发现 ' + newIds.length + ' 条新的带个股 VIP 新闻，继续全市场抓取。');
     } catch (e) {
-      console.log('  ⚠️  VIP 哨兵异常，保守继续抓取：' + (e && e.message ? e.message : e));
+      console.log('  ⚠️  VIP 列表异常，继续抓取：' + (e && e.message ? e.message : e));
     }
   }
 
@@ -182,7 +176,7 @@ function siteLinks() { return process.argv.includes('--site-links'); }
   console.log('  ' + out.jsonPath);
   if (out.cardsPath) console.log('  ' + out.cardsPath + '  （卡片版）');
 
-  // 发布状态：定时任务据此判断“距上次刷新多久了”，决定本轮是否真的重新抓取
+  // 发布状态（供 Pages / 外部对照；不再用于本仓库定时差集门控）
   const nowMs = Date.now();
   const statusPath = path.join(report.OUT_DIR, 'status.json');
   fs.writeFileSync(statusPath, JSON.stringify({
@@ -192,8 +186,7 @@ function siteLinks() { return process.argv.includes('--site-links'); }
     poolLabel: meta.poolLabel,
     days: days,
     rows: rows.length,
-    // VIP 哨兵去重：本轮有效文章 id 集合；下一轮据此做差集判断有无新文章。
-    // 若本轮未走哨兵（curVipIds 为空），保留上一轮的 ids 不回退。
+    // 本轮 VIP 有效 id；未拉取到时保留上一轮，避免回退为空
     lastVipIds: curVipIds.length ? curVipIds : (function () {
       try { return JSON.parse(fs.readFileSync(statusPath, 'utf8')).lastVipIds || []; }
       catch (_) { return []; }

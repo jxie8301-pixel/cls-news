@@ -1,14 +1,11 @@
 name: 抓取 + 企业微信推送 + 发布 Pages
 
+# 「要不要跑」由外部 cls-trigger（VIP 水位 + 有标的）决定后 workflow_dispatch。
+# 本 workflow 不再定时轮询，也不再做 VIP 新增差集门控；被触发后直接全市场抓取并发布。
 on:
   push:
     branches: [main, master]
   workflow_dispatch:
-  schedule:
-    # 每 5 分钟触发一次（UTC），刻意避开整点最拥挤的槽位。
-    # 每次触发只用 1 个请求查 VIP 列表（哨兵）：有新的带个股 VIP 新闻才全市场抓取+发布，
-    # 否则本轮跳过不发布。GitHub schedule 不保证准时，繁忙时实际间隔可能更长。
-    - cron: '3,8,13,18,23,28,33,38,43,48,53,58 * * * *'
 
 permissions:
   contents: write
@@ -20,23 +17,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # ── 门控（已停用时段判断）────────────────────────────────────
-  # 原按交易时段决定是否抓取的逻辑已停用：现在每个触发都放行进入 build，
-  # 真正「抓不抓」由 build 内的 VIP 哨兵决定（有新的带个股 VIP 新闻才全市场抓取，
-  # 否则本轮跳过不发布）。GitHub Actions 每次换出口 IP，不存在 IP 被封问题。
-  gate:
-    runs-on: ubuntu-latest
-    outputs:
-      run: ${{ steps.decide.outputs.run }}
-    steps:
-      - name: 总是放行（交由 VIP 哨兵门控）
-        id: decide
-        run: echo "run=true" >> "$GITHUB_OUTPUT"
-
-  # ── 抓取 + 推送 + 组装发布目录 ───────────────────────────────
   build:
-    needs: gate
-    if: needs.gate.outputs.run == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -48,13 +29,11 @@ jobs:
         run: |
           cp config.example.json config.json
           mkdir -p data out
-          # 继承上一次 Pages 发布的调研/技术面缓存，避免每轮全市场重新请求
+          # 继承上一次 Pages 的调研/技术面缓存，避免每轮全市场重新请求
           curl -fsSL --retry 2 https://jxie8301-pixel.github.io/cls-news/research.json  -o data/research.json  || true
           curl -fsSL --retry 2 https://jxie8301-pixel.github.io/cls-news/technical.json -o data/technical.json || true
-          # 拉回上一轮发布的 status.json（VIP 哨兵据此读 lastVipCtime 判断有无新 VIP 新闻）
           curl -fsSL --retry 2 https://jxie8301-pixel.github.io/cls-news/status.json    -o out/status.json     || true
 
-      # 从 data 分支取回上一轮的「已推送记录」，实现跨轮去重（B1）
       - name: 取回已推送记录 (data 分支)
         run: |
           git fetch origin data --depth 1 || true
@@ -70,26 +49,12 @@ jobs:
         env:
           TZ: Asia/Shanghai
           WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
-          # MiniMax：推送前为每只标的生成一句话；未配置时自动回退 research 题材
           MINIMAX_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
         run: |
-          set +e
+          # 外部已判定需抓取；默认不做 VIP 差集门控（cli 仅在显式 --gate 时才可能 exit 3）
           node src/cli.js --pool all-a --site-links
-          code=$?
-          set -e
-          if [ "$code" = "3" ]; then
-            echo "skipped=true" >> "$GITHUB_OUTPUT"
-            echo "VIP 哨兵：无新的带个股 VIP 新闻，本轮跳过发布。"
-            exit 0
-          elif [ "$code" != "0" ]; then
-            echo "抓取失败，退出码 $code"
-            exit $code
-          fi
-          echo "skipped=false" >> "$GITHUB_OUTPUT"
 
-      # 把更新后的 pushed.json 提交回 data 分支（孤立分支，只存这一个文件）
       - name: 保存已推送记录 (data 分支)
-        if: steps.collect.outputs.skipped != 'true'
         run: |
           if [ ! -f data/pushed.json ]; then echo "无 pushed.json，跳过"; exit 0; fi
           git config user.name  "github-actions[bot]"
@@ -110,7 +75,6 @@ jobs:
           git checkout -
 
       - name: 组装发布目录
-        if: steps.collect.outputs.skipped != 'true'
         run: |
           mkdir -p _site/cards
           cp out/cls-news-latest.html _site/index.html
@@ -123,22 +87,14 @@ jobs:
           TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M %Z' > _site/updated.txt
 
       - uses: actions/configure-pages@v5
-        if: steps.collect.outputs.skipped != 'true'
         with:
           enablement: true
       - uses: actions/upload-pages-artifact@v3
-        if: steps.collect.outputs.skipped != 'true'
         with:
           path: _site
 
-    outputs:
-      skipped: ${{ steps.collect.outputs.skipped }}
-
-  # ── 部署到 GitHub Pages ─────────────────────────────────────
   deploy:
     needs: build
-    # 哨兵跳过本轮时不部署（沿用上一版 Pages）
-    if: needs.build.outputs.skipped != 'true'
     runs-on: ubuntu-latest
     environment:
       name: github-pages
