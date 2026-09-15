@@ -4,7 +4,7 @@
   "refreshMinutes": 10,
   "schedulePolicy": true,
   "days": 1,
-  "concurrency": 8,
+  "concurrency": 6,
   "requestDelayMs": 0,
   "syncPoolsOnStart": true,
   "constituentPageSize": 100,
