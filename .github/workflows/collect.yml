@@ -70,6 +70,8 @@ jobs:
         env:
           TZ: Asia/Shanghai
           WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
+          # MiniMax：推送前为每只标的生成一句话；未配置时自动回退 research 题材
+          MINIMAX_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
         run: |
           set +e
           node src/cli.js --pool all-a --site-links
