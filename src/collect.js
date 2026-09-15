@@ -60,6 +60,11 @@ function loadPools() {
   return out;
 }
 
+/** 名称含 ST / *ST / 退市 等，涨跌幅规则不同，新闻扫描默认剔除。 */
+function isStOrDelistName(name) {
+  return /ST|退/.test(String(name || ''));
+}
+
 /** 同步沪深两市全部上市公司到 data/pools/<key>.json（key 默认 all-a）。 */
 async function syncMarketPool(opts) {
   opts = opts || {};
@@ -67,20 +72,32 @@ async function syncMarketPool(opts) {
   const mp = cfg.marketPool || {};
   if (mp.enabled === false) return null;
   const key = mp.key || 'all-a';
-  const name = mp.name || '沪深A股';
+  const excludeSt = mp.excludeSt !== false && mp.exclude_st !== false;
+  const name = mp.name || (excludeSt ? '沪深A股(非ST)' : '沪深A股');
   const page = cfg.marketPageSize || 200;
   const res = await cls.fetchAllStocks({ page: page, market: mp.market || 'all' });
+  const raw = res.stocks || [];
+  const stocks = excludeSt
+    ? raw.filter(function (s) { return s && s.code && !isStOrDelistName(s.name); })
+    : raw;
+  const dropped = raw.length - stocks.length;
   savePool(key, {
     key: key,
     name: name,
     code: key,
     kind: 'market',
-    source: 'cls.cn /web_quote/web_stock/stock_list?market=all',
+    source: 'cls.cn /web_quote/web_stock/stock_list?market=all'
+      + (excludeSt ? ' + name filter !/(ST|退)/' : ''),
+    excludeSt: excludeSt,
     capturedAt: new Date().toISOString(),
-    count: res.stocks.length,
-    stocks: res.stocks,
+    count: stocks.length,
+    rawCount: raw.length,
+    droppedSt: dropped,
+    stocks: stocks,
   });
-  return { key: key, name: name, count: res.stocks.length, ok: true };
+  console.log('  [pool] ' + name + '：全量 ' + raw.length + ' → 入池 ' + stocks.length
+    + (excludeSt ? '（按名称剔除 ST/退市 ' + dropped + ' 只）' : ''));
+  return { key: key, name: name, count: stocks.length, droppedSt: dropped, ok: true };
 }
 
 /** 同步全部股票池：沪深全量 + config.indexPools 里声明的指数。 */
@@ -90,7 +107,7 @@ async function syncPools(opts) {
     const m = await syncMarketPool(opts);
     if (m) out.push(m);
   } catch (err) {
-    out.push({ key: 'all-a', name: '沪深A股', ok: false, error: String((err && err.message) || err) });
+    out.push({ key: 'all-a', name: '沪深A股(非ST)', ok: false, error: String((err && err.message) || err) });
   }
   const idx = await syncIndexPools(opts);
   for (const x of idx) out.push(x);
@@ -422,6 +439,7 @@ module.exports = {
   syncIndexPools: syncIndexPools,
   syncMarketPool: syncMarketPool,
   syncPools: syncPools,
+  isStOrDelistName: isStOrDelistName,
   loadWatchlist: loadWatchlist,
   saveWatchlist: saveWatchlist,
   loadStore: loadStore,

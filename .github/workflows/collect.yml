@@ -23,7 +23,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
 
       - name: 准备配置与数据目录
         run: |
@@ -57,7 +57,7 @@ jobs:
             echo "[minimax] hint: 若只配在 Environment github-pages，本 build 步骤读不到"
           fi
 
-      - name: 抓取沪深A股目标栏目新闻 + 企业微信推送（只跑 all-a 池）
+      - name: 抓取沪深A股(非ST)目标栏目新闻 + 企业微信推送（只跑 all-a 池）
         id: collect
         env:
           TZ: Asia/Shanghai

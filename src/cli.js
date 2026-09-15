@@ -140,7 +140,7 @@ function siteLinks() { return process.argv.includes('--site-links'); }
     research.attachRows(rows);
   }
   const meta = {
-    title: '财联社 沪深A股 · 目标栏目新闻',
+    title: '财联社 沪深A股(非ST) · 目标栏目新闻',
     range: rangeLabel(days),
     poolLabel: selected.map(function (p) { return p.name + '（' + p.count + ' 只）'; }).join(' / '),
     generatedAt: new Date().toLocaleString('zh-CN'),
