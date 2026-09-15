@@ -44,6 +44,16 @@ jobs:
             echo "data 分支暂无 pushed.json，首次运行。"
           fi
 
+      - name: 检查 MiniMax 密钥是否注入（不打印密钥）
+        env:
+          MINIMAX_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
+        run: |
+          if [ -n "${MINIMAX_API_KEY}" ]; then
+            echo "MINIMAX_API_KEY: 已注入（长度 ${#MINIMAX_API_KEY}）"
+          else
+            echo "MINIMAX_API_KEY: 为空 —— 请到仓库 Settings → Secrets and variables → Actions 配置同名 Secret"
+          fi
+
       - name: 抓取沪深A股目标栏目新闻 + 企业微信推送（只跑 all-a 池）
         id: collect
         env:

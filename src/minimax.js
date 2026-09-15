@@ -49,7 +49,16 @@ function pureCode(code) {
   return String(code || '').replace(/^[a-zA-Z]+/, '');
 }
 
+function stripThink(text) {
+  // MiniMax-M3 常在 content 前带 <think>…</think>，干扰 JSON 截取
+  return String(text || '')
+    .replace(/<think>[\s\S]*?<\/think>/gi, '')
+    .replace(/<thinking>[\s\S]*?<\/thinking>/gi, '')
+    .trim();
+}
+
 function extractJson(text) {
+  text = stripThink(text);
   if (!text) return null;
   const fences = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/gi) || [];
   for (const block of fences) {
@@ -58,10 +67,19 @@ function extractJson(text) {
       try { return JSON.parse(inner); } catch (_) { /* continue */ }
     }
   }
-  const i = text.indexOf('{');
+  // 从后往前找最后一个完整 JSON 对象，避免思考正文里的 { } 干扰
   const j = text.lastIndexOf('}');
-  if (i !== -1 && j > i) {
-    try { return JSON.parse(text.slice(i, j + 1)); } catch (_) { /* ignore */ }
+  if (j === -1) return null;
+  let depth = 0;
+  for (let i = j; i >= 0; i--) {
+    const ch = text[i];
+    if (ch === '}') depth++;
+    else if (ch === '{') {
+      depth--;
+      if (depth === 0) {
+        try { return JSON.parse(text.slice(i, j + 1)); } catch (_) { return null; }
+      }
+    }
   }
   return null;
 }
