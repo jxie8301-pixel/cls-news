@@ -199,9 +199,12 @@ function formatArticle(article, cache, notes) {
     for (const s of groups[board]) {
       const code = pureCode(s.code);
       const tag = code ? s.name + '(' + code + ')' : s.name;
-      // MiniMax 一句话优先；失败则回退 research 题材
-      const desc = (code && notes[code]) || themeOf(cache, s.code) || '';
-      lines.push(' ' + tag + '-' + desc);
+      const ai = (code && notes[code]) || '';
+      const fallback = themeOf(cache, s.code) || '';
+      const desc = ai || fallback;
+      // 便于在企业微信里区分：AI 成功 vs 题材回退
+      const mark = ai ? '' : (fallback ? '(题材)' : '');
+      lines.push(' ' + tag + '-' + mark + desc);
     }
     lines.push('');
   }
@@ -284,6 +287,12 @@ async function pushNew(rows, opts) {
     } catch (e) {
       console.error('  [notify] MiniMax 异常，回退题材描述: ' + (e && e.message ? e.message : e));
       notes = {};
+    }
+    const noteCount = Object.keys(notes || {}).length;
+    if (!noteCount) {
+      console.log('  [notify] 文章 ' + a.id + ' MiniMax 无有效一句话，将回退 research 题材（推送里带(题材)标记）');
+    } else {
+      console.log('  [notify] 文章 ' + a.id + ' 使用 MiniMax 一句话 ' + noteCount + ' 条');
     }
 
     const content = formatArticle(a, cache, notes);

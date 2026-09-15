@@ -88,7 +88,17 @@ function extractChatText(data) {
   if (!data || typeof data !== 'object') return '';
   const c0 = data.choices && data.choices[0];
   if (c0) {
-    if (c0.message && typeof c0.message.content === 'string') return c0.message.content;
+    const msg = c0.message || {};
+    if (typeof msg.content === 'string') return msg.content;
+    // 部分接口 content 为分段数组
+    if (Array.isArray(msg.content)) {
+      return msg.content.map(function (b) {
+        if (typeof b === 'string') return b;
+        if (b && typeof b.text === 'string') return b.text;
+        if (b && typeof b.content === 'string') return b.content;
+        return '';
+      }).join('');
+    }
     if (typeof c0.text === 'string') return c0.text;
   }
   if (typeof data.reply === 'string') return data.reply;
@@ -147,14 +157,25 @@ function httpPostJson(urlStr, headers, body, timeoutMs) {
 async function generateStockNotes(title, brief, stocks, config) {
   const cfg = loadCfg(config);
   if (!cfg.enabled) {
-    console.log('  [minimax] 未启用，跳过');
+    console.log('  [minimax] 未启用（notify.minimax.enabled=false），跳过');
     return {};
   }
   if (!cfg.apiKey) {
-    console.log('  [minimax] 未配置 MINIMAX_API_KEY / notify.minimax.api_key，跳过');
+    console.log('  [minimax] 未配置 Key：请把 MINIMAX_API_KEY 配在「仓库 Actions secrets」（Repository secrets），');
+    console.log('           不要只放在 Environment(github-pages)——build 任务读不到 Environment Secret');
     return {};
   }
-  if (!stocks || !stocks.length) return {};
+  if (!stocks || !stocks.length) {
+    console.log('  [minimax] 无标的列表，跳过');
+    return {};
+  }
+
+  console.log(
+    '  [minimax] 开始推理：stocks=' + stocks.length +
+    ' keyLen=' + cfg.apiKey.length +
+    ' model=' + cfg.model +
+    ' base=' + cfg.baseUrl
+  );
 
   const stockLines = stocks
     .filter(function (s) { return s && s.code; })
@@ -187,10 +208,18 @@ async function generateStockNotes(title, brief, stocks, config) {
     return {};
   }
 
+  // MiniMax 有时 HTTP 200 但业务错误码非 0
+  const br = data && data.base_resp;
+  if (br && Number(br.status_code) !== 0) {
+    console.error('  [minimax] 业务错误 base_resp=' + JSON.stringify(br));
+    return {};
+  }
+
   const text = extractChatText(data);
   const obj = extractJson(text);
   if (!obj || typeof obj !== 'object') {
-    console.error('  [minimax] 回复无法解析为 JSON，前120字: ' + String(text || '').slice(0, 120));
+    console.error('  [minimax] 回复无法解析为 JSON，前200字: ' + String(text || '').slice(0, 200));
+    console.error('  [minimax] raw keys=' + (data ? Object.keys(data).join(',') : 'null'));
     return {};
   }
 
@@ -199,7 +228,11 @@ async function generateStockNotes(title, brief, stocks, config) {
     const code = pureCode(k);
     if (code && typeof v === 'string' && v.trim()) out[code] = v.trim();
   }
-  console.log('  [minimax] 一句话描述生成成功：' + Object.keys(out).length + ' 条');
+  if (!Object.keys(out).length) {
+    console.error('  [minimax] JSON 已解析但无有效代码键: ' + JSON.stringify(obj).slice(0, 200));
+    return {};
+  }
+  console.log('  [minimax] 一句话描述生成成功：' + Object.keys(out).length + ' 条 → ' + Object.keys(out).join(','));
   return out;
 }
 
