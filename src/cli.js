@@ -36,12 +36,11 @@ function siteLinks() { return process.argv.includes('--site-links'); }
   const limit = parseInt(arg('limit', 0), 10) || 0;
   const wantExportOnly = process.argv.includes('--export');
 
-  // ── VIP 列表（仅记录，默认不做「有无新增」门控）────────────────
-  // 「要不要抓」由外部 cls-trigger 决定后 workflow_dispatch；本进程被触发后直接抓取。
-  // 仍拉取 VIP 写 lastVipIds 供 status / 推送侧对照。
-  // 仅当显式传入 --gate 时才恢复旧差集逻辑（无新增则 exit 3）；--export 不做。
+  // ── VIP 差集门控（默认开启）────────────────────────────────
+  // 相对上轮 lastVipIds 无新增有效 VIP 时 exit 3，跳过抓取/推送/发布。
+  // --no-gate 强制全量；--export 不做门控。
   let curVipIds = [];
-  const wantGate = process.argv.includes('--gate');
+  const wantGate = !process.argv.includes('--no-gate');
   if (!wantExportOnly) {
     try {
       const statusPath = path.join(report.OUT_DIR, 'status.json');
@@ -66,10 +65,10 @@ function siteLinks() { return process.argv.includes('--site-links'); }
       console.log('VIP 列表：' + vipItems.length + ' 条'
         + ' ｜ 有效（带个股且非ETF）' + eligible.length + ' 条'
         + ' ｜ 相对上轮新增 ' + newIds.length + ' 条'
-        + (wantGate ? ' ｜ --gate 门控开启' : ' ｜ 外部触发模式（不做差集跳过）'));
+        + (wantGate ? ' ｜ VIP 差集门控开启' : ' ｜ --no-gate 强制全量'));
 
       if (wantGate && newIds.length === 0) {
-        console.log('  ⏭  --gate：无新的带个股 VIP 新闻，本轮跳过抓取与发布。');
+        console.log('  ⏭  无新的带个股 VIP 新闻，本轮跳过抓取与发布。');
         process.exit(3);
       }
     } catch (e) {

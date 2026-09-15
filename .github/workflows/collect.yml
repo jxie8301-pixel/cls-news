@@ -1,10 +1,9 @@
 name: 抓取 + 企业微信推送 + 发布 Pages
 
-# 「要不要跑」由外部 cls-trigger（VIP 水位 + 有标的）决定后 workflow_dispatch。
-# 本 workflow 不再定时轮询，也不再做 VIP 新增差集门控；被触发后直接全市场抓取并发布。
+# 「要不要跑」主要由外部 cls-trigger（VIP 水位 + 有标的）workflow_dispatch。
+# 本 workflow 再做 VIP 差集门控：相对上轮新增 0 条则跳过抓取/推送/Pages（exit 3 → soft skip）。
+# 不在 push 时触发，避免改代码就全量跑；需要强制全量可手动 dispatch 并加输入，或本地 --no-gate。
 on:
-  push:
-    branches: [main, master]
   workflow_dispatch:
 
 permissions:
@@ -19,6 +18,8 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    outputs:
+      skipped: ${{ steps.collect.outputs.skipped }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -29,7 +30,7 @@ jobs:
         run: |
           cp config.example.json config.json
           mkdir -p data out
-          # 继承上一次 Pages 的调研缓存，避免每轮全市场重新请求
+          # 继承上一次 Pages 的调研缓存 / VIP 水位，避免每轮全市场重跑、门控失效
           curl -fsSL --retry 2 https://jxie8301-pixel.github.io/cls-news/research.json  -o data/research.json  || true
           curl -fsSL --retry 2 https://jxie8301-pixel.github.io/cls-news/status.json    -o out/status.json     || true
 
@@ -47,7 +48,6 @@ jobs:
         env:
           MINIMAX_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
         run: |
-          # 统一用小写 [minimax] 前缀，方便在 Actions 日志搜索框检索（区分大小写）
           if [ -n "${MINIMAX_API_KEY}" ]; then
             echo "[minimax] secret_check: present=yes len=${#MINIMAX_API_KEY}"
             echo "[minimax] hint: build 只能读 Repository secrets，读不到 Environment(github-pages) secrets"
@@ -64,10 +64,19 @@ jobs:
           WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
           MINIMAX_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
         run: |
-          # 外部已判定需抓取；默认不做 VIP 差集门控（cli 仅在显式 --gate 时才可能 exit 3）
+          set +e
           node src/cli.js --pool all-a --site-links
+          code=$?
+          if [ "$code" -eq 3 ]; then
+            echo "skipped=true" >> "$GITHUB_OUTPUT"
+            echo "无新增 VIP，跳过后续推送与 Pages 发布"
+            exit 0
+          fi
+          echo "skipped=false" >> "$GITHUB_OUTPUT"
+          exit $code
 
       - name: 保存已推送记录 (data 分支)
+        if: steps.collect.outputs.skipped != 'true'
         run: |
           if [ ! -f data/pushed.json ]; then echo "无 pushed.json，跳过"; exit 0; fi
           git config user.name  "github-actions[bot]"
@@ -88,6 +97,7 @@ jobs:
           git checkout -
 
       - name: 组装发布目录
+        if: steps.collect.outputs.skipped != 'true'
         run: |
           mkdir -p _site/cards
           cp out/cls-news-latest.html _site/index.html
@@ -99,14 +109,17 @@ jobs:
           TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M %Z' > _site/updated.txt
 
       - uses: actions/configure-pages@v5
+        if: steps.collect.outputs.skipped != 'true'
         with:
           enablement: true
       - uses: actions/upload-pages-artifact@v3
+        if: steps.collect.outputs.skipped != 'true'
         with:
           path: _site
 
   deploy:
     needs: build
+    if: needs.build.outputs.skipped != 'true'
     runs-on: ubuntu-latest
     environment:
       name: github-pages
