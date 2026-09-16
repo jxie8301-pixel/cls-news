@@ -214,7 +214,8 @@ function buildHeadBlock(article) {
     ? ('**' + time + parts.lead + '**' + parts.rest)
     : ('**' + time + '**' + parts.rest);
   const brief = String(article.text || '').replace(/\s+/g, ' ').trim();
-  return (headLine + '\n\n> 摘要: ' + brief + '\n').replace(/\s+$/, '') + '\n';
+  // 摘要后必须空行，结束 `>` 引用，避免后续板块/个股被续进摘要块
+  return headLine + '\n\n> 摘要: ' + brief + '\n\n';
 }
 
 function buildStockLines(article, cache, notes) {
@@ -280,7 +281,7 @@ function splitWecomMarkdownMessages(article, cache, notes) {
     const fixed = headLine + '\n\n> 摘要: ';
     const budget = WECOM_MD_SAFE_BYTES - utf8Len(fixed) - 2;
     const brief = truncateUtf8(String(article.text || '').replace(/\s+/g, ' ').trim(), Math.max(20, budget));
-    head = fixed + brief + '\n';
+    head = fixed + brief + '\n\n';
   }
 
   const stockLines = buildStockLines(article, cache, notes);
