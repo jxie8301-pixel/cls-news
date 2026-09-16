@@ -6,7 +6,7 @@
  *
  * 必须走 Responses API：POST {base_url}/responses
  *   + tools: [{type: web_search}]
- *   + tool_choice 强制先联网检索，再写「独特标签+热点+硬连接+边界」。
+ *   + tool_choice 强制先联网检索，再写「可核实特色+热点+硬连接+边界」。
  * /chat/completions 无托管联网，旧实现不会搜索。
  *
  * 失败/未配置时返回 {}，由 notify 回退到 research 题材描述。
@@ -22,23 +22,37 @@ const DEFAULT_MAX_OUTPUT_TOKENS = 16384;
 const EVIDENCE_MAX_CHARS = 12000;
 const RETRIABLE_HTTP = new Set([408, 409, 425, 429, 500, 502, 503, 504]);
 
+/** 模型偶发把句型标签写进正文，推送前剥离 */
+const STYLE_PREFIX_RE = /^(?:稀缺卡位型|订单催化型|转型重估型|卖铲人型)[，,：:\s]*/;
+/** 强词告警（不自动作废，便于日志复查） */
+const STRONG_CLAIM_RE = /独家|唯一|首家|市占第一|超九成|全球仅有|业绩弹性直接|量价齐升|(?:6G|5G-A).{0,12}(?:直接供货|批量供货|量产)/;
+
 const PROMPT_TEMPLATE = `你是一名A股短线投研助理。推送行已带「公司名(代码)-」，你只写破折号后的**一句话**，不要再写公司名/代码。
 
 核心目标：让人一眼看懂——它凭什么特殊、为什么现在和这个热点有关、关联有多真。
-公式：**独特标签 + 当前热点标签 + 硬连接/受益路径 + 验证点或边界**。
+公式：**可核实特色 + 当前热点标签 + 硬连接/受益路径 + 验证点或边界**。
 禁止「AI+教育」「机器人+新能源」这类概念拼接；删掉热点词后公司仍应有特色，删掉公司名后不能套到任意题材股。
 
 ## 写作前请联网检索核实（逐只）
-1. 公司层：主营/收入构成、核心产品、客户、产能、技术、市占、资质；找出唯一性（少数/唯一/龙头/首家/独家供应/隐形冠军/转型卡位等）。
-2. 热点层：结合本条 VIP，只提炼 1—2 个最相关热点词（政策/产业事件/订单/涨价/国产替代等），不要堆砌。
-3. 连接层：热点与公司如何连？直接收入/订单/客户，还是参股/试点/概念？尽量用可检索事实（订单、产能、客户名、收入占比、公告进度）。无硬证据只能写「概念关联」。
+1. 公司层：主营/收入构成、核心产品、客户、资质、技术进度。写出**一条可检索特色**即可；没有就写常规卡位，不要为了「稀缺」而编造。
+2. 热点层：结合本条 VIP，只提炼 1—2 个最相关热点词，不要堆砌。
+3. 连接硬度：先判断本条新闻对该股是「直接订单 / 客户验证 / 技术储备·预研 / 纯主题提及」哪一档；**一句话语气不得超过该硬度**（本条若写储备/探索，不得升格为量产供货或业绩弹性直接）。
+4. 连接层：尽量用可检索事实。无硬证据只能写「概念关联」。
 
-## 句式（100 字以内，四要素尽量齐全；优先写清，勿注水）
-优先模板：「【独特标签】+【热点标签】+【受益路径】+【验证点/边界】」
-可套用：稀缺卡位型 / 订单催化型 / 转型重估型 / 卖铲人型。
-有可核实数据时尽量点出（客户/收入占比/订单或产能量级/公告进度），仍须控制在 100 字内。
-边界词必用其一（当连接不硬时更要写）：直接/间接、参股、小批量、试点、占比低、尚在验证、暂无正式订单、概念关联。
-禁止：复述标题、编造未检索到的市占/客户/订单、把蹭概念写成核心受益、只写热点不写特色、空话注水凑字数。
+## 进度用词（必须遵守）
+- 技术储备/预研/跟踪 → 写「预研储备、跟踪标准」；禁止写「6G器件直接供货、6G量产」。
+- 样品/小批量/试点 → 写「样品验证、试点」；禁止写「核心受益、业绩弹性直接」。
+- 批量供货/中标/收入确认 → 才可写「直接供货、订单落地」。
+
+## 数字与绝对化表述
+- 收入占比、市占、订单金额、产能利用率等：无年报/半年报/公告/互动易依据，禁止写具体数字或「持续提升」。
+- 「独家/唯一/首家/市占第一/全球仅有」：无原文依据禁止使用；可改用「全资办××学院」「滤波器龙头之一」「主设备商供应商」等可核表述。
+
+## 句式（100 字以内；优先写清，勿注水）
+直接写业务内容：特色 + 热点 + 路径 + 边界。
+可在内心组织叙事，但**正文不得出现**「稀缺卡位型」「订单催化型」「转型重估型」「卖铲人型」等类型名，也不要以类型名开头。
+验证点只能来自本条 VIP 已写明的进度，或检索到的公告/财报节点；没有就写边界（预研阶段、贡献尚早、概念关联偏强、取决于运营商资本开支等）。
+禁止：复述标题、编造未检索到的市占/客户/订单/占比、把蹭概念写成核心受益、空话注水凑字数。
 
 ## 新闻标题
 {title}
@@ -51,7 +65,7 @@ const PROMPT_TEMPLATE = `你是一名A股短线投研助理。推送行已带「
 
 ## 输出要求
 联网检索并归纳后，只输出**一个** JSON 代码块，键为 6 位股票代码，值为该股一句话。
-下方仅为**格式示意**，内容不得复用、不得照抄：
+下方仅为**格式示意**，内容不得复用、不得照抄；第一句直接写业务特色：
 \`\`\`json
 {"000001": "<按四要素填写，不少于 30 字，不超过 100 字>"}
 \`\`\`
@@ -79,7 +93,6 @@ function loadCfg(config) {
     apiKey: String(apiKey || '').trim(),
     model: n.model || DEFAULT_MODEL,
     baseUrl: String(n.base_url || n.baseUrl || DEFAULT_BASE).replace(/\/$/, ''),
-    // 联网搜索更慢，默认 180s
     timeout: Math.max(30, Number(n.timeout) || 180) * 1000,
     webSearch: n.web_search !== false && n.webSearch !== false,
     maxOutputTokens: Number.isFinite(maxTok) && maxTok > 0 ? maxTok : DEFAULT_MAX_OUTPUT_TOKENS,
@@ -95,6 +108,21 @@ function stripThink(text) {
     .replace(/<think>[\s\S]*?<\/think>/gi, '')
     .replace(/<thinking>[\s\S]*?<\/thinking>/gi, '')
     .trim();
+}
+
+/** 剥句型标签前缀；强词仅告警不丢弃 */
+function polishNote(code, raw) {
+  let text = String(raw || '').trim();
+  if (!text) return '';
+  const stripped = text.replace(STYLE_PREFIX_RE, '').trim();
+  if (stripped !== text) {
+    console.warn('[minimax] 已剥离句型标签前缀 code=' + code + ' → ' + stripped.slice(0, 40));
+    text = stripped;
+  }
+  if (STRONG_CLAIM_RE.test(text)) {
+    console.warn('[minimax] 强词告警 code=' + code + ' note=' + text.slice(0, 80));
+  }
+  return text;
 }
 
 /** 多 fence 时优先取靠近文末的块，避免抄到 prompt 里的格式示例 */
@@ -146,7 +174,6 @@ function extractChatText(data) {
   return '';
 }
 
-/** 从 Responses API 响应提取最终文本 */
 function extractResponsesText(data) {
   if (!data || typeof data !== 'object') return '';
   const ot = data.output_text;
@@ -185,7 +212,6 @@ function extractResponsesText(data) {
   return reasoning.join('').trim();
 }
 
-/** 收集首轮检索证据：去重 + 按单元截断，供第二轮不联网收尾 */
 function extractResponsesEvidence(data) {
   const seen = new Set();
   const out = [];
@@ -343,7 +369,7 @@ async function callResponses(cfg, prompt, webSearch, maxOutputTokens) {
   return callWithRetry(cfg, buildResponsesPayload(cfg, prompt, webSearch, maxOutputTokens));
 }
 
-/** 收尾轮：只发精简指令 + 证据，不再复用首轮全文 prompt */
+/** 收尾轮：精简指令 + 证据，规则与首轮一致 */
 function buildFinalizePrompt(stocks, evidence) {
   const codes = (stocks || [])
     .filter(function (s) { return s && s.code; })
@@ -353,8 +379,11 @@ function buildFinalizePrompt(stocks, evidence) {
     .join('\n');
   return [
     '现在请基于下方「已联网检索得到的资料」，为以下每只 A 股各写一句 100 字内的描述。',
-    '严格遵守四要素：独特标签 + 当前热点标签 + 硬连接/受益路径 + 验证点或边界。',
-    '若证据不足，宁可写「概念关联/暂无正式订单」等边界词，不得编造客户/订单/市占。',
+    '公式：可核实特色 + 热点 + 硬连接/路径 + 验证点或边界。',
+    '语气不得超过本条新闻连接硬度；储备/预研不得写成量产供货或业绩弹性直接。',
+    '无出处禁止写收入占比/市占/产能利用率等数字；禁止独家/唯一等无依据绝对化。',
+    '正文不得出现「稀缺卡位型」等句型类型名；第一句直接写业务特色。',
+    '若证据不足，写「概念关联/预研阶段/贡献尚早」等边界词，不得编造。',
     '只输出一个 JSON 代码块，键为 6 位股票代码；下方仅为格式示意，内容不得复用：',
     '```json',
     '{"000001": "<按四要素填写>"}',
@@ -380,7 +409,8 @@ function notesFromText(text, allowCodes) {
     const code = pureCode(k);
     if (!code || typeof v !== 'string' || !v.trim()) continue;
     if (allowCodes && !allowCodes.has(code)) continue;
-    out[code] = v.trim();
+    const polished = polishNote(code, v);
+    if (polished) out[code] = polished;
   }
   return Object.keys(out).length ? out : null;
 }
@@ -466,6 +496,7 @@ module.exports = {
   loadCfg: loadCfg,
   pureCode: pureCode,
   sanitize: sanitize,
+  polishNote: polishNote,
   extractJson: extractJson,
   extractResponsesText: extractResponsesText,
   extractResponsesEvidence: extractResponsesEvidence,
