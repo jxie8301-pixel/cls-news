@@ -9,7 +9,8 @@
     "collect": "node src/cli.js",
     "export": "node src/cli.js --export",
     "backup": "node src/backup.js",
-    "watchlist": "node src/watchlist.js"
+    "watchlist": "node src/watchlist.js",
+    "push-perf": "node src/push_perf.js"
   },
   "engines": {
     "node": ">=18"

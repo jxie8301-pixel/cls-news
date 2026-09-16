@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>推送复盘 · T+1～T+5</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--line:#e6e8eb;--ink:#1c1c1e;--dim:#7a8290;--brand:#c2410c;--brandbg:#fff3ea;--ok:#0f9d58;--warn:#d93025}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.55 "Microsoft YaHei",system-ui,-apple-system,"Segoe UI",sans-serif}
+header{background:#fff;border-bottom:1px solid var(--line);padding:14px 20px 12px}
+h1{font-size:17px;margin:0;font-weight:600}
+.sub{color:var(--dim);font-size:12.5px;margin-top:4px}
+.wrap{padding:16px 20px 40px;max-width:1280px;margin:0 auto}
+.toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:end;margin-bottom:14px}
+.field{display:flex;flex-direction:column;gap:4px}
+.field label{font-size:12px;color:var(--dim)}
+input,button,select{font:inherit;padding:6px 10px;border:1px solid var(--line);border-radius:6px;background:#fff;color:var(--ink)}
+button{cursor:pointer}
+button.primary{background:var(--brand);border-color:var(--brand);color:#fff}
+button:disabled{opacity:.55;cursor:default}
+.stats{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:14px}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:10px 14px;min-width:110px}
+.stat .k{font-size:12px;color:var(--dim)}
+.stat .v{font-size:18px;font-weight:600;font-variant-numeric:tabular-nums;margin-top:2px}
+.table-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:8px;background:var(--card)}
+table{border-collapse:collapse;width:100%;min-width:980px;table-layout:fixed}
+th,td{padding:8px 10px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top;overflow-wrap:anywhere;word-break:break-word}
+th{background:#fafbfc;font-weight:600;color:#4b5563;font-size:12.5px;white-space:nowrap;position:sticky;top:0}
+td.num{font-variant-numeric:tabular-nums;white-space:nowrap}
+.up{color:var(--warn);font-weight:600}
+.down{color:var(--ok);font-weight:600}
+.mut{color:var(--dim)}
+.title{font-size:13px;line-height:1.45}
+.note{font-size:12.5px;color:#3b4149}
+.pager{display:flex;align-items:center;gap:10px;margin-top:12px;flex-wrap:wrap}
+.err{color:var(--warn);padding:20px;background:#fff5f5;border:1px solid #ffd4d4;border-radius:8px}
+@media (max-width:760px){
+  header,.wrap{padding-left:12px;padding-right:12px}
+  .stat{min-width:90px;padding:8px 10px}
+  .stat .v{font-size:16px}
+}
+</style>
+</head>
+<body>
+<header>
+  <h1>推送复盘 · T+1～T+5</h1>
+  <div class="sub" id="sub">加载 pushes.db…</div>
+</header>
+<div class="wrap">
+  <div class="toolbar">
+    <div class="field">
+      <label for="dateFrom">T0 起</label>
+      <input type="date" id="dateFrom">
+    </div>
+    <div class="field">
+      <label for="dateTo">T0 止</label>
+      <input type="date" id="dateTo">
+    </div>
+    <div class="field">
+      <label for="code">个股代码</label>
+      <input type="search" id="code" placeholder="如 600519" autocomplete="off">
+    </div>
+    <div class="field">
+      <label for="pageSize">每页</label>
+      <select id="pageSize">
+        <option value="20">20</option>
+        <option value="50" selected>50</option>
+        <option value="100">100</option>
+      </select>
+    </div>
+    <button class="primary" id="btnQuery" type="button">查询</button>
+    <button id="btnReset" type="button">重置</button>
+  </div>
+
+  <div class="stats" id="stats"></div>
+  <div id="err" class="err" hidden></div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th style="width:7%">新闻时间</th>
+          <th style="width:7%">栏目</th>
+          <th style="width:16%">标题</th>
+          <th style="width:8%">个股</th>
+          <th style="width:14%">一句话</th>
+          <th style="width:6%">T0</th>
+          <th style="width:5%">T+1</th>
+          <th style="width:5%">T+2</th>
+          <th style="width:5%">T+3</th>
+          <th style="width:5%">T+4</th>
+          <th style="width:5%">T+5</th>
+          <th style="width:6%">累计</th>
+        </tr>
+      </thead>
+      <tbody id="tbody"><tr><td colspan="12" class="mut">加载中…</td></tr></tbody>
+    </table>
+  </div>
+  <div class="pager">
+    <button id="prev" type="button" disabled>上一页</button>
+    <span id="pageInfo" class="mut">—</span>
+    <button id="next" type="button" disabled>下一页</button>
+  </div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/sql.js@1.10.3/dist/sql-wasm.js"></script>
+<script>
+(function () {
+  var DB_URL = '../pushes.db';
+  var WASM_URL = 'https://cdn.jsdelivr.net/npm/sql.js@1.10.3/dist/sql-wasm.wasm';
+  var db = null;
+  var page = 1;
+  var total = 0;
+
+  function $(id) { return document.getElementById(id); }
+  function h(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+  function ymdToKey(ymd) {
+    if (!ymd) return '';
+    return String(ymd).replace(/-/g, '');
+  }
+  function keyToDash(key) {
+    var s = String(key || '');
+    if (s.length !== 8) return s;
+    return s.slice(0, 4) + '-' + s.slice(4, 6) + '-' + s.slice(6, 8);
+  }
+  function fmtCtime(sec) {
+    var n = Number(sec) || 0;
+    if (!n) return '—';
+    var d = new Date(n * 1000);
+    var p = new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Asia/Shanghai',
+      month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit',
+      hour12: false,
+    }).formatToParts(d);
+    var get = function (t) {
+      var hit = p.find(function (x) { return x.type === t; });
+      return hit ? hit.value : '';
+    };
+    return get('month') + '-' + get('day') + ' ' + get('hour') + ':' + get('minute');
+  }
+  function pctCell(v) {
+    if (v === null || v === undefined || v === '') return '<span class="mut">—</span>';
+    var n = Number(v);
+    if (!Number.isFinite(n)) return '<span class="mut">—</span>';
+    var cls = n > 0 ? 'up' : (n < 0 ? 'down' : '');
+    var sign = n > 0 ? '+' : '';
+    return '<span class="num ' + cls + '">' + sign + n.toFixed(2) + '%</span>';
+  }
+  function whereClause() {
+    var parts = [];
+    var from = ymdToKey($('dateFrom').value);
+    var to = ymdToKey($('dateTo').value);
+    var code = String($('code').value || '').trim().replace(/^[a-zA-Z]+/i, '');
+    if (from) parts.push("s.t0_date >= '" + from.replace(/'/g, "''") + "'");
+    if (to) parts.push("s.t0_date <= '" + to.replace(/'/g, "''") + "'");
+    if (code) parts.push("s.code LIKE '%" + code.replace(/'/g, "''") + "%'");
+    return parts.length ? (' WHERE ' + parts.join(' AND ')) : '';
+  }
+
+  function loadStats() {
+    var w = whereClause();
+    var sql =
+      'SELECT ' +
+      'COUNT(*) AS n, ' +
+      'SUM(CASE WHEN t1_pct IS NOT NULL THEN 1 ELSE 0 END) AS n1, ' +
+      'SUM(CASE WHEN t1_pct > 0 THEN 1 ELSE 0 END) AS u1, ' +
+      'SUM(CASE WHEN t2_pct IS NOT NULL THEN 1 ELSE 0 END) AS n2, ' +
+      'SUM(CASE WHEN t2_pct > 0 THEN 1 ELSE 0 END) AS u2, ' +
+      'SUM(CASE WHEN t3_pct IS NOT NULL THEN 1 ELSE 0 END) AS n3, ' +
+      'SUM(CASE WHEN t3_pct > 0 THEN 1 ELSE 0 END) AS u3, ' +
+      'SUM(CASE WHEN t4_pct IS NOT NULL THEN 1 ELSE 0 END) AS n4, ' +
+      'SUM(CASE WHEN t4_pct > 0 THEN 1 ELSE 0 END) AS u4, ' +
+      'SUM(CASE WHEN t5_pct IS NOT NULL THEN 1 ELSE 0 END) AS n5, ' +
+      'SUM(CASE WHEN t5_pct > 0 THEN 1 ELSE 0 END) AS u5 ' +
+      'FROM push_stock s JOIN push p ON p.article_id = s.article_id' + w;
+    var row = db.exec(sql)[0];
+    var v = function (i) { return row && row.values[0] ? Number(row.values[0][i]) || 0 : 0; };
+    total = v(0);
+    function rate(u, n) {
+      if (!n) return '—';
+      return ((u / n) * 100).toFixed(1) + '%';
+    }
+    var html =
+      '<div class="stat"><div class="k">样本</div><div class="v">' + total + '</div></div>' +
+      '<div class="stat"><div class="k">T+1 上涨率</div><div class="v">' + rate(v(2), v(1)) + '</div></div>' +
+      '<div class="stat"><div class="k">T+2 上涨率</div><div class="v">' + rate(v(4), v(3)) + '</div></div>' +
+      '<div class="stat"><div class="k">T+3 上涨率</div><div class="v">' + rate(v(6), v(5)) + '</div></div>' +
+      '<div class="stat"><div class="k">T+4 上涨率</div><div class="v">' + rate(v(8), v(7)) + '</div></div>' +
+      '<div class="stat"><div class="k">T+5 上涨率</div><div class="v">' + rate(v(10), v(9)) + '</div></div>';
+    $('stats').innerHTML = html;
+  }
+
+  function loadPage() {
+    var size = Math.max(1, Number($('pageSize').value) || 50);
+    var pages = Math.max(1, Math.ceil(total / size) || 1);
+    if (page > pages) page = pages;
+    if (page < 1) page = 1;
+    var offset = (page - 1) * size;
+    var w = whereClause();
+    var sql =
+      'SELECT p.ctime, p.prefix, p.title, s.code, s.name, s.note, s.t0_date, ' +
+      's.t1_pct, s.t2_pct, s.t3_pct, s.t4_pct, s.t5_pct, s.cum5_pct, s.realized_days ' +
+      'FROM push_stock s JOIN push p ON p.article_id = s.article_id' + w +
+      ' ORDER BY p.ctime DESC, s.code ASC LIMIT ' + size + ' OFFSET ' + offset;
+    var res = db.exec(sql)[0];
+    var tb = $('tbody');
+    if (!res || !res.values.length) {
+      tb.innerHTML = '<tr><td colspan="12" class="mut">无数据</td></tr>';
+    } else {
+      tb.innerHTML = res.values.map(function (r) {
+        var name = (r[4] || '') + ' ' + (r[3] || '');
+        return '<tr>' +
+          '<td class="num">' + h(fmtCtime(r[0])) + '</td>' +
+          '<td>' + h(r[1] || '') + '</td>' +
+          '<td class="title">' + h(r[2] || '') + '</td>' +
+          '<td>' + h(name.trim()) + '</td>' +
+          '<td class="note">' + h(r[5] || '') + '</td>' +
+          '<td class="num">' + h(keyToDash(r[6])) + '</td>' +
+          '<td>' + pctCell(r[7]) + '</td>' +
+          '<td>' + pctCell(r[8]) + '</td>' +
+          '<td>' + pctCell(r[9]) + '</td>' +
+          '<td>' + pctCell(r[10]) + '</td>' +
+          '<td>' + pctCell(r[11]) + '</td>' +
+          '<td>' + pctCell(r[12]) + '</td>' +
+          '</tr>';
+      }).join('');
+    }
+    $('pageInfo').textContent = '第 ' + page + ' / ' + pages + ' 页 · 共 ' + total + ' 条';
+    $('prev').disabled = page <= 1;
+    $('next').disabled = page >= pages;
+  }
+
+  function refresh() {
+    $('err').hidden = true;
+    loadStats();
+    loadPage();
+  }
+
+  async function boot() {
+    try {
+      var SQL = await initSqlJs({ locateFile: function () { return WASM_URL; } });
+      var resp = await fetch(DB_URL + '?t=' + Date.now(), { cache: 'no-store' });
+      if (!resp.ok) throw new Error('下载 pushes.db 失败 HTTP ' + resp.status);
+      var buf = await resp.arrayBuffer();
+      db = new SQL.Database(new Uint8Array(buf));
+      var nPush = 0, nStock = 0;
+      try {
+        nPush = db.exec('SELECT COUNT(*) FROM push')[0].values[0][0];
+        nStock = db.exec('SELECT COUNT(*) FROM push_stock')[0].values[0][0];
+      } catch (e) { /* empty */ }
+      $('sub').textContent = '库内 push=' + nPush + ' · push_stock=' + nStock +
+        ' · 口径：T0=新闻交易日收盘；上涨率=涨幅>0 / 已实现样本';
+      refresh();
+    } catch (e) {
+      $('sub').textContent = '加载失败';
+      $('err').hidden = false;
+      $('err').textContent = String(e && e.message ? e.message : e);
+      $('tbody').innerHTML = '<tr><td colspan="12" class="mut">无法打开数据库</td></tr>';
+    }
+  }
+
+  $('btnQuery').addEventListener('click', function () { page = 1; refresh(); });
+  $('btnReset').addEventListener('click', function () {
+    $('dateFrom').value = '';
+    $('dateTo').value = '';
+    $('code').value = '';
+    page = 1;
+    refresh();
+  });
+  $('prev').addEventListener('click', function () { if (page > 1) { page--; loadPage(); } });
+  $('next').addEventListener('click', function () { page++; loadPage(); });
+  $('pageSize').addEventListener('change', function () { page = 1; refresh(); });
+  $('code').addEventListener('keydown', function (ev) {
+    if (ev.key === 'Enter') { page = 1; refresh(); }
+  });
+
+  boot();
+})();
+</script>
+</body>
+</html>

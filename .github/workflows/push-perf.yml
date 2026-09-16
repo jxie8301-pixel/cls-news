@@ -1,0 +1,111 @@
+name: 推送复盘 T+1～T+5
+
+# 北京时间每天 03:00 ≈ UTC 19:00；与 collect 共用 pages 并发组，避免同时写 data / Pages。
+on:
+  schedule:
+    - cron: '0 19 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  perf:
+    runs-on: ubuntu-latest
+    outputs:
+      publish: ${{ steps.db.outputs.found }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: 安装 sqlite3 CLI
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sqlite3
+
+      - name: 取回 pushes.db (data 分支)
+        id: db
+        run: |
+          mkdir -p data
+          git fetch origin data --depth 1 || true
+          if git cat-file -e origin/data:pushes.db 2>/dev/null; then
+            git show origin/data:pushes.db > data/pushes.db
+            echo "found=true" >> "$GITHUB_OUTPUT"
+            echo "已取回 pushes.db"
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            echo "data 分支暂无 pushes.db，跳过计算"
+          fi
+
+      - name: 计算 T0 / T+1～T+5
+        if: steps.db.outputs.found == 'true'
+        env:
+          TZ: Asia/Shanghai
+        run: node src/push_perf.js --db data/pushes.db --concurrency 8
+
+      - name: 写回 pushes.db (data 分支)
+        if: steps.db.outputs.found == 'true'
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          tmp=$(mktemp -d)
+          cp data/pushes.db "$tmp/pushes.db"
+          git fetch origin data --depth 1 || true
+          if git show-ref --verify --quiet refs/remotes/origin/data; then
+            git checkout -B data origin/data
+          else
+            git checkout --orphan data
+            git rm -rf . >/dev/null 2>&1 || true
+          fi
+          cp "$tmp/pushes.db" pushes.db
+          git add pushes.db
+          git commit -m "update pushes.db perf [skip ci]" || echo "无变化，跳过提交"
+          git push origin data
+          git checkout -
+
+      - name: 组装发布目录（保留现网页面 + 更新 db /perf）
+        if: steps.db.outputs.found == 'true'
+        run: |
+          SITE=https://jxie8301-pixel.github.io/cls-news
+          mkdir -p _site/cards _site/perf
+          # 尽量保留现网新闻页，避免清晨任务覆盖掉 VIP 发布内容
+          curl -fsSL --retry 2 "$SITE/index.html"        -o _site/index.html        || true
+          curl -fsSL --retry 2 "$SITE/cards/index.html"  -o _site/cards/index.html  || true
+          curl -fsSL --retry 2 "$SITE/news.csv"          -o _site/news.csv          || true
+          curl -fsSL --retry 2 "$SITE/news.json"         -o _site/news.json         || true
+          curl -fsSL --retry 2 "$SITE/status.json"       -o _site/status.json       || true
+          curl -fsSL --retry 2 "$SITE/research.json"     -o _site/research.json     || true
+          curl -fsSL --retry 2 "$SITE/updated.txt"       -o _site/updated.txt       || true
+          # 无现网首页时给个占位，避免空站
+          if [ ! -s _site/index.html ]; then
+            printf '%s\n' '<!doctype html><meta charset=utf-8><title>cls-news</title><p><a href="perf/">推送复盘</a></p>' > _site/index.html
+          fi
+          cp public/perf/index.html _site/perf/index.html
+          cp data/pushes.db _site/pushes.db
+          TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M %Z' > _site/perf-updated.txt
+
+      - uses: actions/configure-pages@v5
+        if: steps.db.outputs.found == 'true'
+        with:
+          enablement: true
+      - uses: actions/upload-pages-artifact@v3
+        if: steps.db.outputs.found == 'true'
+        with:
+          path: _site
+
+  deploy:
+    needs: perf
+    if: needs.perf.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

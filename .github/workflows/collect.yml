@@ -128,13 +128,15 @@ jobs:
       - name: 组装发布目录
         if: steps.collect.outputs.skipped != 'true'
         run: |
-          mkdir -p _site/cards
+          mkdir -p _site/cards _site/perf
           cp out/cls-news-latest.html _site/index.html
           cp out/cls-news-cards.html  _site/cards/index.html
           cp out/cls-news-latest.csv  _site/news.csv
           cp out/cls-news-latest.json _site/news.json
           cp out/status.json          _site/status.json
           cp data/research.json  _site/research.json  || true
+          cp public/perf/index.html _site/perf/index.html
+          [ -f data/pushes.db ] && cp data/pushes.db _site/pushes.db
           TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M %Z' > _site/updated.txt
 
       - uses: actions/configure-pages@v5
