@@ -26,7 +26,7 @@
       "base_url": "https://api.minimaxi.com/v1",
       "timeout": 180,
       "web_search": true,
-      "max_output_tokens": 4096,
+      "max_output_tokens": 16384,
       "api_key": ""
     }
   },

@@ -18,6 +18,9 @@ const { URL } = require('node:url');
 
 const DEFAULT_MODEL = 'MiniMax-M3';
 const DEFAULT_BASE = 'https://api.minimaxi.com/v1';
+const DEFAULT_MAX_OUTPUT_TOKENS = 16384;
+const EVIDENCE_MAX_CHARS = 12000;
+const RETRIABLE_HTTP = new Set([408, 409, 425, 429, 500, 502, 503, 504]);
 
 const PROMPT_TEMPLATE = `你是一名A股短线投研助理。推送行已带「公司名(代码)-」，你只写破折号后的**一句话**，不要再写公司名/代码。
 
@@ -47,14 +50,30 @@ const PROMPT_TEMPLATE = `你是一名A股短线投研助理。推送行已带「
 {stock_lines}
 
 ## 输出要求
-检索并归纳后，只输出一个 JSON 代码块，键为6位股票代码，值为该股一句话，例如：
+联网检索并归纳后，只输出**一个** JSON 代码块，键为 6 位股票代码，值为该股一句话。
+下方仅为**格式示意**，内容不得复用、不得照抄：
 \`\`\`json
-{"603270": "精密冲压起家，切入液冷板与谐波柔轮初坯，卡位算力散热与人形机器人；样品已客户验证、小批量阶段，新建液冷产能尚无正式订单，属订单催化早期", "002491": "光电通信覆盖光棒—光纤—光缆—设备一体化，产品可支撑万兆光网；对接机构净买入与光网景气，关键看运营商集采份额与光棒扩产落地进度"}
+{"000001": "<按四要素填写，不少于 30 字，不超过 100 字>"}
 \`\`\`
 不要输出 JSON 以外的任何内容。`;
+
+function sleep(ms) {
+  return new Promise(function (r) { setTimeout(r, ms); });
+}
+
+function sanitize(s, maxLen) {
+  maxLen = maxLen == null ? 2000 : maxLen;
+  return String(s == null ? '' : s)
+    .replace(/```/g, '')
+    .replace(/<\/?(?:system|user|assistant|think|thinking)\w*>/gi, '')
+    .replace(/===[^=]{0,40}===/g, '')
+    .slice(0, maxLen);
+}
+
 function loadCfg(config) {
   const n = (config && config.notify && config.notify.minimax) || {};
   const apiKey = process.env.MINIMAX_API_KEY || n.api_key || n.apiKey || '';
+  const maxTok = Number(n.max_output_tokens || n.maxOutputTokens || DEFAULT_MAX_OUTPUT_TOKENS);
   return {
     enabled: n.enabled !== false,
     apiKey: String(apiKey || '').trim(),
@@ -63,7 +82,7 @@ function loadCfg(config) {
     // 联网搜索更慢，默认 180s
     timeout: Math.max(30, Number(n.timeout) || 180) * 1000,
     webSearch: n.web_search !== false && n.webSearch !== false,
-    maxOutputTokens: Number(n.max_output_tokens || n.maxOutputTokens || 4096) || 4096,
+    maxOutputTokens: Number.isFinite(maxTok) && maxTok > 0 ? maxTok : DEFAULT_MAX_OUTPUT_TOKENS,
   };
 }
 
@@ -78,15 +97,18 @@ function stripThink(text) {
     .trim();
 }
 
+/** 多 fence 时优先取靠近文末的块，避免抄到 prompt 里的格式示例 */
 function extractJson(text) {
   text = stripThink(text);
   if (!text) return null;
   const fences = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/gi) || [];
-  for (const block of fences) {
-    const inner = block.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
-    if (inner.startsWith('{') && inner.endsWith('}')) {
-      try { return JSON.parse(inner); } catch (_) { /* continue */ }
-    }
+  for (let i = fences.length - 1; i >= 0; i--) {
+    const inner = fences[i]
+      .replace(/^```(?:json)?\s*/i, '')
+      .replace(/\s*```$/, '')
+      .trim();
+    if (!inner.startsWith('{') || !inner.endsWith('}')) continue;
+    try { return JSON.parse(inner); } catch (_) { /* try earlier */ }
   }
   const j = text.lastIndexOf('}');
   if (j === -1) return null;
@@ -152,7 +174,6 @@ function extractResponsesText(data) {
   const chat = extractChatText(data);
   if (chat) return chat;
 
-  // 仅有 reasoning 时兜底
   const reasoning = [];
   for (const item of data.output || []) {
     if (item && item.type === 'reasoning') {
@@ -164,34 +185,53 @@ function extractResponsesText(data) {
   return reasoning.join('').trim();
 }
 
-/** 收集首轮检索证据，供第二轮不联网收尾 */
+/** 收集首轮检索证据：去重 + 按单元截断，供第二轮不联网收尾 */
 function extractResponsesEvidence(data) {
-  const parts = [];
+  const seen = new Set();
+  const out = [];
+
+  function pushUnique(key, text) {
+    if (!text || seen.has(key)) return;
+    seen.add(key);
+    out.push(text);
+  }
+
   for (const item of (data && data.output) || []) {
     if (!item || typeof item !== 'object') continue;
-    if (item.type === 'message') {
+
+    if (item.type === 'web_search_call') {
+      const action = item.action || {};
+      const qs = []
+        .concat(action.query || [], action.queries || [])
+        .filter(Boolean);
+      for (const q of qs) pushUnique('q:' + q, '[搜索] ' + q);
+    } else if (item.type === 'message') {
       for (const block of item.content || []) {
         if (!block || typeof block !== 'object') continue;
         if ((block.type === 'output_text' || block.type === 'text') && block.text) {
-          parts.push(String(block.text).trim());
+          const t = String(block.text).trim();
+          pushUnique('t:' + t.slice(0, 80), t);
         }
         for (const ann of block.annotations || []) {
-          if (ann && ann.type === 'url_citation') {
-            const cite = [ann.title, ann.url].filter(Boolean).join(' ');
-            const content = String(ann.content || '').slice(0, 800);
-            if (cite || content) parts.push('[来源] ' + (cite + (content ? '\n' + content : '')).trim());
-          }
+          if (!ann || ann.type !== 'url_citation') continue;
+          const cite = [ann.title, ann.url].filter(Boolean).join(' ');
+          const key = 'c:' + (ann.url || cite);
+          if (!cite && !ann.content) continue;
+          const body = cite + (ann.content ? '\n' + String(ann.content).slice(0, 800) : '');
+          pushUnique(key, '[来源] ' + body.trim());
         }
-      }
-    } else if (item.type === 'web_search_call') {
-      const action = item.action || {};
-      if (action.query) parts.push('[搜索] ' + action.query);
-      if (Array.isArray(action.queries) && action.queries.length) {
-        parts.push('[搜索] ' + action.queries.filter(Boolean).join('；'));
       }
     }
   }
-  return parts.filter(Boolean).join('\n\n').slice(0, 12000);
+
+  let len = 0;
+  const truncated = [];
+  for (const p of out) {
+    if (len + p.length + 2 > EVIDENCE_MAX_CHARS) break;
+    truncated.push(p);
+    len += p.length + 2;
+  }
+  return truncated.join('\n\n');
 }
 
 function countWebSearchCalls(data) {
@@ -200,6 +240,16 @@ function countWebSearchCalls(data) {
     if (item && item.type === 'web_search_call') n++;
   }
   return n;
+}
+
+function assertOk(data) {
+  if (data && data.error) {
+    throw new Error('API error: ' + JSON.stringify(data.error).slice(0, 300));
+  }
+  const br = data && data.base_resp;
+  if (br && Number(br.status_code) !== 0) {
+    throw new Error('业务错误 base_resp=' + JSON.stringify(br).slice(0, 300));
+  }
 }
 
 function httpPostJson(urlStr, headers, body, timeoutMs) {
@@ -247,11 +297,11 @@ function httpPostJson(urlStr, headers, body, timeoutMs) {
   });
 }
 
-function buildResponsesPayload(cfg, prompt, webSearch) {
+function buildResponsesPayload(cfg, prompt, webSearch, maxOutputTokens) {
   const payload = {
     model: cfg.model,
     input: prompt,
-    max_output_tokens: cfg.maxOutputTokens,
+    max_output_tokens: maxOutputTokens != null ? maxOutputTokens : cfg.maxOutputTokens,
   };
   if (webSearch) {
     payload.tools = [{ type: 'web_search' }];
@@ -260,27 +310,77 @@ function buildResponsesPayload(cfg, prompt, webSearch) {
   return payload;
 }
 
-async function callResponses(cfg, prompt, webSearch) {
-  const data = await httpPostJson(
-    cfg.baseUrl + '/responses',
-    { Authorization: 'Bearer ' + cfg.apiKey },
-    buildResponsesPayload(cfg, prompt, webSearch),
-    cfg.timeout
-  );
-  const br = data && data.base_resp;
-  if (br && Number(br.status_code) !== 0) {
-    throw new Error('业务错误 base_resp=' + JSON.stringify(br));
+async function callWithRetry(cfg, payload, retries) {
+  retries = retries == null ? 2 : retries;
+  let lastErr;
+  for (let i = 0; i <= retries; i++) {
+    try {
+      const data = await httpPostJson(
+        cfg.baseUrl + '/responses',
+        { Authorization: 'Bearer ' + cfg.apiKey },
+        payload,
+        cfg.timeout
+      );
+      assertOk(data);
+      return data;
+    } catch (e) {
+      lastErr = e;
+      const msg = String(e && e.message ? e.message : e);
+      const m = msg.match(/HTTP (\d+)/);
+      const code = m ? Number(m[1]) : 0;
+      const retriable = (code && RETRIABLE_HTTP.has(code))
+        || /timeout|ECONNRESET|ETIMEDOUT|EAI_AGAIN/i.test(msg);
+      if (!retriable || i === retries) break;
+      const delay = 1000 * Math.pow(2, i) + Math.random() * 400;
+      console.warn('[minimax] ' + msg.slice(0, 80) + ' → ' + Math.floor(delay) + 'ms 后重试 ' + (i + 1) + '/' + retries);
+      await sleep(delay);
+    }
   }
-  return data;
+  throw lastErr;
 }
 
-function notesFromText(text) {
+async function callResponses(cfg, prompt, webSearch, maxOutputTokens) {
+  return callWithRetry(cfg, buildResponsesPayload(cfg, prompt, webSearch, maxOutputTokens));
+}
+
+/** 收尾轮：只发精简指令 + 证据，不再复用首轮全文 prompt */
+function buildFinalizePrompt(stocks, evidence) {
+  const codes = (stocks || [])
+    .filter(function (s) { return s && s.code; })
+    .map(function (s) {
+      return pureCode(s.code) + (s.name ? ' ' + sanitize(s.name, 60) : '');
+    })
+    .join('\n');
+  return [
+    '现在请基于下方「已联网检索得到的资料」，为以下每只 A 股各写一句 100 字内的描述。',
+    '严格遵守四要素：独特标签 + 当前热点标签 + 硬连接/受益路径 + 验证点或边界。',
+    '若证据不足，宁可写「概念关联/暂无正式订单」等边界词，不得编造客户/订单/市占。',
+    '只输出一个 JSON 代码块，键为 6 位股票代码；下方仅为格式示意，内容不得复用：',
+    '```json',
+    '{"000001": "<按四要素填写>"}',
+    '```',
+    '',
+    '## 涉及个股',
+    codes,
+    '',
+    '## 已联网检索资料（请据此填写，禁止二次检索）',
+    evidence || '（无可用资料，按「概念关联」处理）',
+  ].join('\n');
+}
+
+/**
+ * @param {string} text
+ * @param {Set<string>|null} allowCodes 若给定，只保留请求标的代码
+ */
+function notesFromText(text, allowCodes) {
   const obj = extractJson(text);
   if (!obj || typeof obj !== 'object') return null;
   const out = {};
   for (const [k, v] of Object.entries(obj)) {
     const code = pureCode(k);
-    if (code && typeof v === 'string' && v.trim()) out[code] = v.trim();
+    if (!code || typeof v !== 'string' || !v.trim()) continue;
+    if (allowCodes && !allowCodes.has(code)) continue;
+    out[code] = v.trim();
   }
   return Object.keys(out).length ? out : null;
 }
@@ -303,21 +403,26 @@ async function generateStockNotes(title, brief, stocks, config) {
     return {};
   }
 
+  const allowCodes = new Set();
   const stockLines = stocks
     .filter(function (s) { return s && s.code; })
-    .map(function (s) { return pureCode(s.code) + ' ' + (s.name || ''); })
+    .map(function (s) {
+      const code = pureCode(s.code);
+      if (code) allowCodes.add(code);
+      return code + ' ' + sanitize(s.name, 60);
+    })
     .join('\n');
 
   const prompt = PROMPT_TEMPLATE
-    .replace('{title}', title || '')
-    .replace('{brief}', brief || '')
+    .replace('{title}', sanitize(title, 2000))
+    .replace('{brief}', sanitize(brief, 4000))
     .replace('{stock_lines}', stockLines);
 
   const useSearch = cfg.webSearch;
   console.log(
     '[minimax] 开始推理(responses' + (useSearch ? '+web_search强制' : '') + ')：stocks=' +
     stocks.length + ' keyLen=' + cfg.apiKey.length + ' model=' + cfg.model +
-    ' timeoutMs=' + cfg.timeout
+    ' timeoutMs=' + cfg.timeout + ' maxOut=' + cfg.maxOutputTokens
   );
 
   let data;
@@ -332,21 +437,16 @@ async function generateStockNotes(title, brief, stocks, config) {
   console.log('[minimax] 首轮完成 web_search_calls=' + searchCalls + ' status=' + (data.status || ''));
 
   let text = extractResponsesText(data);
-  let notes = notesFromText(text);
+  let notes = notesFromText(text, allowCodes);
 
-  // 首轮只搜不写 JSON：回喂证据做不联网收尾（与本地 deepseek/minimax 质证策略一致）
   if (!notes && useSearch) {
-    console.log('[minimax] 首轮未产出 JSON，发起收尾调用（不联网，回喂检索证据）');
+    console.log('[minimax] 首轮未产出 JSON，发起收尾调用（不联网，精简指令+检索证据）');
     const evidence = extractResponsesEvidence(data) || text || '（无额外资料）';
-    const finalizePrompt =
-      prompt +
-      '\n\n=== 你在上一轮联网检索中已获取的资料（请据此直接给出最终 JSON，无需再检索） ===\n' +
-      evidence +
-      '\n\n=== 现在请立即只输出最终 JSON 代码块 ===';
+    const finalizePrompt = buildFinalizePrompt(stocks, evidence);
     try {
-      const data2 = await callResponses(cfg, finalizePrompt, false);
+      const data2 = await callResponses(cfg, finalizePrompt, false, cfg.maxOutputTokens);
       text = extractResponsesText(data2) || text;
-      notes = notesFromText(text);
+      notes = notesFromText(text, allowCodes);
       console.log('[minimax] 收尾完成 web_search_calls=' + countWebSearchCalls(data2));
     } catch (e) {
       console.error('[minimax] 收尾调用失败: ' + (e && e.message ? e.message : e));
@@ -365,7 +465,10 @@ async function generateStockNotes(title, brief, stocks, config) {
 module.exports = {
   loadCfg: loadCfg,
   pureCode: pureCode,
+  sanitize: sanitize,
   extractJson: extractJson,
   extractResponsesText: extractResponsesText,
+  extractResponsesEvidence: extractResponsesEvidence,
+  notesFromText: notesFromText,
   generateStockNotes: generateStockNotes,
 };
