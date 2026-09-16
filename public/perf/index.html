@@ -39,6 +39,18 @@ td.rate{font-variant-numeric:tabular-nums;white-space:nowrap;font-weight:600}
 .pager{display:flex;align-items:center;gap:10px;margin-top:12px;flex-wrap:wrap}
 .err{color:var(--warn);padding:20px;background:#fff5f5;border:1px solid #ffd4d4;border-radius:8px}
 tr.active-prefix{background:var(--brandbg)}
+.view-toggle{display:inline-flex;gap:0;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.view-toggle button{border:0;border-radius:0;background:#fff;padding:6px 12px}
+.view-toggle button + button{border-left:1px solid var(--line)}
+.view-toggle button.on{background:var(--brandbg);color:var(--brand);font-weight:600}
+tr.article-head{background:#fafbfc}
+tr.article-head td{border-bottom-color:#eceef1;padding-top:10px;padding-bottom:8px}
+tr.article-head .meta{color:var(--dim);font-size:12.5px;font-variant-numeric:tabular-nums;margin-right:8px;white-space:nowrap}
+tr.article-head .pf{display:inline-block;background:var(--brandbg);color:var(--brand);border:1px solid #ffd7bd;border-radius:4px;padding:1px 7px;font-size:12px;margin-right:8px}
+tr.stock-row td:first-child{padding-left:22px;color:#3b4149}
+tr.stock-row td{font-size:13px}
+.sec-row{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin:0 0 8px}
+.sec-row .sec{margin:0}
 @media (max-width:760px){
   header,.wrap{padding-left:12px;padding-right:12px}
   .stat{min-width:90px;padding:8px 10px}
@@ -103,26 +115,17 @@ tr.active-prefix{background:var(--brandbg)}
     </table>
   </div>
 
-  <div class="sec">明细</div>
+  <div class="sec-row">
+    <div class="sec">明细</div>
+    <div class="view-toggle" role="group" aria-label="明细视图">
+      <button type="button" id="viewNews" class="on">按新闻</button>
+      <button type="button" id="viewStock">按个股</button>
+    </div>
+  </div>
   <div id="err" class="err" hidden></div>
   <div class="table-wrap">
     <table>
-      <thead>
-        <tr>
-          <th style="width:7%">新闻时间</th>
-          <th style="width:7%">栏目</th>
-          <th style="width:16%">标题</th>
-          <th style="width:8%">个股</th>
-          <th style="width:14%">一句话</th>
-          <th style="width:6%">T0</th>
-          <th style="width:5%">T+1</th>
-          <th style="width:5%">T+2</th>
-          <th style="width:5%">T+3</th>
-          <th style="width:5%">T+4</th>
-          <th style="width:5%">T+5</th>
-          <th style="width:6%">累计</th>
-        </tr>
-      </thead>
+      <thead id="thead"></thead>
       <tbody id="tbody"><tr><td colspan="12" class="mut">加载中…</td></tr></tbody>
     </table>
   </div>
@@ -139,7 +142,9 @@ tr.active-prefix{background:var(--brandbg)}
   var WASM_URL = 'https://cdn.jsdelivr.net/npm/sql.js@1.10.3/dist/sql-wasm.wasm';
   var db = null;
   var page = 1;
-  var total = 0;
+  var totalStocks = 0;   // 统计样本（个股行）
+  var pageTotal = 0;     // 当前视图分页总数（新闻篇数或个股行数）
+  var viewMode = 'news'; // news | stock
 
   function $(id) { return document.getElementById(id); }
   function h(s) {
@@ -251,9 +256,9 @@ tr.active-prefix{background:var(--brandbg)}
       'FROM push_stock s JOIN push p ON p.article_id = s.article_id' + w;
     var row = db.exec(sql)[0];
     var v = function (i) { return row && row.values[0] ? Number(row.values[0][i]) || 0 : 0; };
-    total = v(0);
+    totalStocks = v(0);
     $('stats').innerHTML =
-      '<div class="stat"><div class="k">样本</div><div class="v">' + total + '</div></div>' +
+      '<div class="stat"><div class="k">样本(个股)</div><div class="v">' + totalStocks + '</div></div>' +
       '<div class="stat"><div class="k">T+1 上涨率</div><div class="v">' + rateText(v(2), v(1)) + '</div></div>' +
       '<div class="stat"><div class="k">T+2 上涨率</div><div class="v">' + rateText(v(4), v(3)) + '</div></div>' +
       '<div class="stat"><div class="k">T+3 上涨率</div><div class="v">' + rateText(v(6), v(5)) + '</div></div>' +
@@ -305,16 +310,138 @@ tr.active-prefix{background:var(--brandbg)}
     }).join('');
   }
 
-  function loadPage() {
+  function stockName(code, name) {
+    return ((name || '') + ' ' + (code || '')).trim();
+  }
+
+  function renderThead() {
+    if (viewMode === 'news') {
+      $('thead').innerHTML =
+        '<tr>' +
+        '<th style="width:18%">个股</th>' +
+        '<th style="width:22%">一句话</th>' +
+        '<th style="width:8%">T0</th>' +
+        '<th style="width:8%">T+1</th>' +
+        '<th style="width:8%">T+2</th>' +
+        '<th style="width:8%">T+3</th>' +
+        '<th style="width:8%">T+4</th>' +
+        '<th style="width:8%">T+5</th>' +
+        '<th style="width:8%">累计</th>' +
+        '</tr>';
+    } else {
+      $('thead').innerHTML =
+        '<tr>' +
+        '<th style="width:7%">新闻时间</th>' +
+        '<th style="width:7%">栏目</th>' +
+        '<th style="width:16%">标题</th>' +
+        '<th style="width:8%">个股</th>' +
+        '<th style="width:14%">一句话</th>' +
+        '<th style="width:6%">T0</th>' +
+        '<th style="width:5%">T+1</th>' +
+        '<th style="width:5%">T+2</th>' +
+        '<th style="width:5%">T+3</th>' +
+        '<th style="width:5%">T+4</th>' +
+        '<th style="width:5%">T+5</th>' +
+        '<th style="width:6%">累计</th>' +
+        '</tr>';
+    }
+  }
+
+  function countArticles(w) {
+    var sql =
+      'SELECT COUNT(DISTINCT p.article_id) FROM push_stock s ' +
+      'JOIN push p ON p.article_id = s.article_id' + w;
+    var res = db.exec(sql)[0];
+    return res && res.values[0] ? Number(res.values[0][0]) || 0 : 0;
+  }
+
+  function loadPageNews() {
     var size = Math.max(1, Number($('pageSize').value) || 50);
-    var pages = Math.max(1, Math.ceil(total / size) || 1);
+    var w = whereClause({ includePrefix: true });
+    pageTotal = countArticles(w);
+    var pages = Math.max(1, Math.ceil(pageTotal / size) || 1);
+    if (page > pages) page = pages;
+    if (page < 1) page = 1;
+    var offset = (page - 1) * size;
+
+    var pageSql =
+      'SELECT p.article_id, MAX(p.ctime) AS ctime, MAX(p.prefix) AS prefix, MAX(p.title) AS title ' +
+      'FROM push_stock s JOIN push p ON p.article_id = s.article_id' + w +
+      ' GROUP BY p.article_id ORDER BY ctime DESC LIMIT ' + size + ' OFFSET ' + offset;
+    var arts = db.exec(pageSql)[0];
+    var tb = $('tbody');
+    if (!arts || !arts.values.length) {
+      tb.innerHTML = '<tr><td colspan="9" class="mut">无数据</td></tr>';
+      updatePager(pages, '篇');
+      return;
+    }
+
+    var ids = arts.values.map(function (r) { return "'" + escSql(r[0]) + "'"; });
+    var code = String($('code').value || '').trim().replace(/^[a-zA-Z]+/i, '');
+    var from = ymdToKey($('dateFrom').value);
+    var to = ymdToKey($('dateTo').value);
+    var stockWhere = ['s.article_id IN (' + ids.join(',') + ')'];
+    if (code) stockWhere.push("s.code LIKE '%" + escSql(code) + "%'");
+    if (from) stockWhere.push("s.t0_date >= '" + escSql(from) + "'");
+    if (to) stockWhere.push("s.t0_date <= '" + escSql(to) + "'");
+    var stockSql =
+      'SELECT s.article_id, s.code, s.name, s.note, s.t0_date, ' +
+      's.t1_pct, s.t2_pct, s.t3_pct, s.t4_pct, s.t5_pct, s.cum5_pct ' +
+      'FROM push_stock s WHERE ' + stockWhere.join(' AND ') +
+      ' ORDER BY s.article_id, s.code ASC';
+    var stocks = db.exec(stockSql)[0];
+    var byArt = {};
+    if (stocks) {
+      stocks.values.forEach(function (r) {
+        var id = r[0];
+        if (!byArt[id]) byArt[id] = [];
+        byArt[id].push(r);
+      });
+    }
+
+    var html = [];
+    arts.values.forEach(function (a) {
+      var id = a[0];
+      var list = byArt[id] || [];
+      html.push(
+        '<tr class="article-head"><td colspan="9">' +
+        '<span class="meta">' + h(fmtCtime(a[1])) + '</span>' +
+        '<span class="pf">' + h(a[2] || '') + '</span>' +
+        '<span class="title">' + h(a[3] || '') + '</span>' +
+        '<span class="mut"> · ' + list.length + ' 只</span>' +
+        '</td></tr>'
+      );
+      list.forEach(function (r) {
+        html.push(
+          '<tr class="stock-row">' +
+          '<td>' + h(stockName(r[1], r[2])) + '</td>' +
+          '<td class="note">' + h(r[3] || '') + '</td>' +
+          '<td class="num">' + h(keyToDash(r[4])) + '</td>' +
+          '<td>' + pctCell(r[5]) + '</td>' +
+          '<td>' + pctCell(r[6]) + '</td>' +
+          '<td>' + pctCell(r[7]) + '</td>' +
+          '<td>' + pctCell(r[8]) + '</td>' +
+          '<td>' + pctCell(r[9]) + '</td>' +
+          '<td>' + pctCell(r[10]) + '</td>' +
+          '</tr>'
+        );
+      });
+    });
+    tb.innerHTML = html.join('');
+    updatePager(pages, '篇');
+  }
+
+  function loadPageStock() {
+    var size = Math.max(1, Number($('pageSize').value) || 50);
+    pageTotal = totalStocks;
+    var pages = Math.max(1, Math.ceil(pageTotal / size) || 1);
     if (page > pages) page = pages;
     if (page < 1) page = 1;
     var offset = (page - 1) * size;
     var w = whereClause({ includePrefix: true });
     var sql =
       'SELECT p.ctime, p.prefix, p.title, s.code, s.name, s.note, s.t0_date, ' +
-      's.t1_pct, s.t2_pct, s.t3_pct, s.t4_pct, s.t5_pct, s.cum5_pct, s.realized_days ' +
+      's.t1_pct, s.t2_pct, s.t3_pct, s.t4_pct, s.t5_pct, s.cum5_pct ' +
       'FROM push_stock s JOIN push p ON p.article_id = s.article_id' + w +
       ' ORDER BY p.ctime DESC, s.code ASC LIMIT ' + size + ' OFFSET ' + offset;
     var res = db.exec(sql)[0];
@@ -323,12 +450,11 @@ tr.active-prefix{background:var(--brandbg)}
       tb.innerHTML = '<tr><td colspan="12" class="mut">无数据</td></tr>';
     } else {
       tb.innerHTML = res.values.map(function (r) {
-        var name = (r[4] || '') + ' ' + (r[3] || '');
         return '<tr>' +
           '<td class="num">' + h(fmtCtime(r[0])) + '</td>' +
           '<td>' + h(r[1] || '') + '</td>' +
           '<td class="title">' + h(r[2] || '') + '</td>' +
-          '<td>' + h(name.trim()) + '</td>' +
+          '<td>' + h(stockName(r[3], r[4])) + '</td>' +
           '<td class="note">' + h(r[5] || '') + '</td>' +
           '<td class="num">' + h(keyToDash(r[6])) + '</td>' +
           '<td>' + pctCell(r[7]) + '</td>' +
@@ -340,9 +466,29 @@ tr.active-prefix{background:var(--brandbg)}
           '</tr>';
       }).join('');
     }
-    $('pageInfo').textContent = '第 ' + page + ' / ' + pages + ' 页 · 共 ' + total + ' 条';
+    updatePager(pages, '条');
+  }
+
+  function updatePager(pages, unit) {
+    $('pageInfo').textContent =
+      '第 ' + page + ' / ' + pages + ' 页 · 共 ' + pageTotal + ' ' + unit +
+      (viewMode === 'news' ? '（样本 ' + totalStocks + ' 个股）' : '');
     $('prev').disabled = page <= 1;
     $('next').disabled = page >= pages;
+  }
+
+  function loadPage() {
+    renderThead();
+    if (viewMode === 'news') loadPageNews();
+    else loadPageStock();
+  }
+
+  function setViewMode(mode) {
+    viewMode = mode === 'stock' ? 'stock' : 'news';
+    $('viewNews').classList.toggle('on', viewMode === 'news');
+    $('viewStock').classList.toggle('on', viewMode === 'stock');
+    page = 1;
+    loadPage();
   }
 
   function refresh() {
@@ -399,6 +545,8 @@ tr.active-prefix{background:var(--brandbg)}
   $('code').addEventListener('keydown', function (ev) {
     if (ev.key === 'Enter') { page = 1; refresh(); }
   });
+  $('viewNews').addEventListener('click', function () { setViewMode('news'); });
+  $('viewStock').addEventListener('click', function () { setViewMode('stock'); });
   $('prefixStats').addEventListener('click', function (ev) {
     var btn = ev.target && ev.target.closest ? ev.target.closest('.btn-prefix') : null;
     if (!btn) return;
