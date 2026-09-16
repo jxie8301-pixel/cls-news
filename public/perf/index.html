@@ -23,11 +23,14 @@ button:disabled{opacity:.55;cursor:default}
 .stat{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:10px 14px;min-width:110px}
 .stat .k{font-size:12px;color:var(--dim)}
 .stat .v{font-size:18px;font-weight:600;font-variant-numeric:tabular-nums;margin-top:2px}
-.table-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:8px;background:var(--card)}
+.sec{margin:0 0 8px;font-size:13px;font-weight:600;color:#4b5563}
+.table-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:8px;background:var(--card);margin-bottom:16px}
 table{border-collapse:collapse;width:100%;min-width:980px;table-layout:fixed}
+table.compact{min-width:720px}
 th,td{padding:8px 10px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top;overflow-wrap:anywhere;word-break:break-word}
 th{background:#fafbfc;font-weight:600;color:#4b5563;font-size:12.5px;white-space:nowrap;position:sticky;top:0}
 td.num{font-variant-numeric:tabular-nums;white-space:nowrap}
+td.rate{font-variant-numeric:tabular-nums;white-space:nowrap;font-weight:600}
 .up{color:var(--warn);font-weight:600}
 .down{color:var(--ok);font-weight:600}
 .mut{color:var(--dim)}
@@ -35,6 +38,7 @@ td.num{font-variant-numeric:tabular-nums;white-space:nowrap}
 .note{font-size:12.5px;color:#3b4149}
 .pager{display:flex;align-items:center;gap:10px;margin-top:12px;flex-wrap:wrap}
 .err{color:var(--warn);padding:20px;background:#fff5f5;border:1px solid #ffd4d4;border-radius:8px}
+tr.active-prefix{background:var(--brandbg)}
 @media (max-width:760px){
   header,.wrap{padding-left:12px;padding-right:12px}
   .stat{min-width:90px;padding:8px 10px}
@@ -49,6 +53,10 @@ td.num{font-variant-numeric:tabular-nums;white-space:nowrap}
 </header>
 <div class="wrap">
   <div class="toolbar">
+    <div class="field">
+      <label for="prefix">栏目</label>
+      <select id="prefix"><option value="">全部栏目</option></select>
+    </div>
     <div class="field">
       <label for="dateFrom">T0 起</label>
       <input type="date" id="dateFrom">
@@ -73,7 +81,29 @@ td.num{font-variant-numeric:tabular-nums;white-space:nowrap}
     <button id="btnReset" type="button">重置</button>
   </div>
 
+  <div class="sec">当前筛选 · 合计上涨率</div>
   <div class="stats" id="stats"></div>
+
+  <div class="sec">按栏目 · T+1～T+5 上涨率</div>
+  <div class="table-wrap">
+    <table class="compact">
+      <thead>
+        <tr>
+          <th style="width:22%">栏目</th>
+          <th style="width:10%">样本</th>
+          <th style="width:11%">T+1</th>
+          <th style="width:11%">T+2</th>
+          <th style="width:11%">T+3</th>
+          <th style="width:11%">T+4</th>
+          <th style="width:11%">T+5</th>
+          <th style="width:13%">操作</th>
+        </tr>
+      </thead>
+      <tbody id="prefixStats"><tr><td colspan="8" class="mut">加载中…</td></tr></tbody>
+    </table>
+  </div>
+
+  <div class="sec">明细</div>
   <div id="err" class="err" hidden></div>
   <div class="table-wrap">
     <table>
@@ -149,19 +179,62 @@ td.num{font-variant-numeric:tabular-nums;white-space:nowrap}
     var sign = n > 0 ? '+' : '';
     return '<span class="num ' + cls + '">' + sign + n.toFixed(2) + '%</span>';
   }
-  function whereClause() {
+  function rateText(u, n) {
+    if (!n) return '—';
+    return ((u / n) * 100).toFixed(1) + '%';
+  }
+  function rateCell(u, n) {
+    if (!n) return '<span class="mut">—</span>';
+    var pct = (u / n) * 100;
+    var cls = pct >= 50 ? 'up' : (pct > 0 ? '' : 'down');
+    return '<span class="rate ' + cls + '">' + pct.toFixed(1) + '%</span>' +
+      '<span class="mut"> (' + u + '/' + n + ')</span>';
+  }
+  function escSql(s) {
+    return String(s).replace(/'/g, "''");
+  }
+
+  /** @param {{includePrefix?: boolean}} opts */
+  function whereParts(opts) {
+    opts = opts || {};
     var parts = [];
     var from = ymdToKey($('dateFrom').value);
     var to = ymdToKey($('dateTo').value);
     var code = String($('code').value || '').trim().replace(/^[a-zA-Z]+/i, '');
-    if (from) parts.push("s.t0_date >= '" + from.replace(/'/g, "''") + "'");
-    if (to) parts.push("s.t0_date <= '" + to.replace(/'/g, "''") + "'");
-    if (code) parts.push("s.code LIKE '%" + code.replace(/'/g, "''") + "%'");
+    var prefix = String($('prefix').value || '');
+    if (from) parts.push("s.t0_date >= '" + escSql(from) + "'");
+    if (to) parts.push("s.t0_date <= '" + escSql(to) + "'");
+    if (code) parts.push("s.code LIKE '%" + escSql(code) + "%'");
+    if (opts.includePrefix !== false && prefix) {
+      parts.push("p.prefix = '" + escSql(prefix) + "'");
+    }
+    return parts;
+  }
+  function whereClause(opts) {
+    var parts = whereParts(opts);
     return parts.length ? (' WHERE ' + parts.join(' AND ')) : '';
   }
 
+  function fillPrefixOptions() {
+    var sel = $('prefix');
+    var cur = sel.value;
+    var res = db.exec(
+      "SELECT DISTINCT COALESCE(prefix, '') AS prefix FROM push ORDER BY prefix COLLATE NOCASE"
+    )[0];
+    var opts = ['<option value="">全部栏目</option>'];
+    if (res) {
+      res.values.forEach(function (r) {
+        var p = r[0] || '';
+        if (!p) return;
+        opts.push('<option value="' + h(p) + '">' + h(p) + '</option>');
+      });
+    }
+    sel.innerHTML = opts.join('');
+    if (cur) sel.value = cur;
+  }
+
   function loadStats() {
-    var w = whereClause();
+    var w = whereClause({ includePrefix: true });
     var sql =
       'SELECT ' +
       'COUNT(*) AS n, ' +
@@ -179,18 +252,57 @@ td.num{font-variant-numeric:tabular-nums;white-space:nowrap}
     var row = db.exec(sql)[0];
     var v = function (i) { return row && row.values[0] ? Number(row.values[0][i]) || 0 : 0; };
     total = v(0);
-    function rate(u, n) {
-      if (!n) return '—';
-      return ((u / n) * 100).toFixed(1) + '%';
-    }
-    var html =
+    $('stats').innerHTML =
       '<div class="stat"><div class="k">样本</div><div class="v">' + total + '</div></div>' +
-      '<div class="stat"><div class="k">T+1 上涨率</div><div class="v">' + rate(v(2), v(1)) + '</div></div>' +
-      '<div class="stat"><div class="k">T+2 上涨率</div><div class="v">' + rate(v(4), v(3)) + '</div></div>' +
-      '<div class="stat"><div class="k">T+3 上涨率</div><div class="v">' + rate(v(6), v(5)) + '</div></div>' +
-      '<div class="stat"><div class="k">T+4 上涨率</div><div class="v">' + rate(v(8), v(7)) + '</div></div>' +
-      '<div class="stat"><div class="k">T+5 上涨率</div><div class="v">' + rate(v(10), v(9)) + '</div></div>';
-    $('stats').innerHTML = html;
+      '<div class="stat"><div class="k">T+1 上涨率</div><div class="v">' + rateText(v(2), v(1)) + '</div></div>' +
+      '<div class="stat"><div class="k">T+2 上涨率</div><div class="v">' + rateText(v(4), v(3)) + '</div></div>' +
+      '<div class="stat"><div class="k">T+3 上涨率</div><div class="v">' + rateText(v(6), v(5)) + '</div></div>' +
+      '<div class="stat"><div class="k">T+4 上涨率</div><div class="v">' + rateText(v(8), v(7)) + '</div></div>' +
+      '<div class="stat"><div class="k">T+5 上涨率</div><div class="v">' + rateText(v(10), v(9)) + '</div></div>';
+  }
+
+  function loadPrefixStats() {
+    // 按栏目对照：只吃日期/个股筛选，不吃当前栏目筛选，便于横向比较
+    var w = whereClause({ includePrefix: false });
+    var sql =
+      'SELECT COALESCE(p.prefix, \'\') AS prefix, ' +
+      'COUNT(*) AS n, ' +
+      'SUM(CASE WHEN s.t1_pct IS NOT NULL THEN 1 ELSE 0 END), ' +
+      'SUM(CASE WHEN s.t1_pct > 0 THEN 1 ELSE 0 END), ' +
+      'SUM(CASE WHEN s.t2_pct IS NOT NULL THEN 1 ELSE 0 END), ' +
+      'SUM(CASE WHEN s.t2_pct > 0 THEN 1 ELSE 0 END), ' +
+      'SUM(CASE WHEN s.t3_pct IS NOT NULL THEN 1 ELSE 0 END), ' +
+      'SUM(CASE WHEN s.t3_pct > 0 THEN 1 ELSE 0 END), ' +
+      'SUM(CASE WHEN s.t4_pct IS NOT NULL THEN 1 ELSE 0 END), ' +
+      'SUM(CASE WHEN s.t4_pct > 0 THEN 1 ELSE 0 END), ' +
+      'SUM(CASE WHEN s.t5_pct IS NOT NULL THEN 1 ELSE 0 END), ' +
+      'SUM(CASE WHEN s.t5_pct > 0 THEN 1 ELSE 0 END) ' +
+      'FROM push_stock s JOIN push p ON p.article_id = s.article_id' + w +
+      ' GROUP BY COALESCE(p.prefix, \'\') ' +
+      'ORDER BY n DESC, prefix COLLATE NOCASE';
+    var res = db.exec(sql)[0];
+    var tb = $('prefixStats');
+    var selected = String($('prefix').value || '');
+    if (!res || !res.values.length) {
+      tb.innerHTML = '<tr><td colspan="8" class="mut">无数据</td></tr>';
+      return;
+    }
+    tb.innerHTML = res.values.map(function (r) {
+      var prefix = r[0] || '(空)';
+      var n = Number(r[1]) || 0;
+      var active = selected && selected === r[0];
+      return '<tr class="' + (active ? 'active-prefix' : '') + '" data-prefix="' + h(r[0] || '') + '">' +
+        '<td>' + h(prefix) + '</td>' +
+        '<td class="num">' + n + '</td>' +
+        '<td>' + rateCell(Number(r[3]) || 0, Number(r[2]) || 0) + '</td>' +
+        '<td>' + rateCell(Number(r[5]) || 0, Number(r[4]) || 0) + '</td>' +
+        '<td>' + rateCell(Number(r[7]) || 0, Number(r[6]) || 0) + '</td>' +
+        '<td>' + rateCell(Number(r[9]) || 0, Number(r[8]) || 0) + '</td>' +
+        '<td>' + rateCell(Number(r[11]) || 0, Number(r[10]) || 0) + '</td>' +
+        '<td><button type="button" class="btn-prefix" data-prefix="' + h(r[0] || '') + '">' +
+        (active ? '已选中' : '查看') + '</button></td>' +
+        '</tr>';
+    }).join('');
   }
 
   function loadPage() {
@@ -199,7 +311,7 @@ td.num{font-variant-numeric:tabular-nums;white-space:nowrap}
     if (page > pages) page = pages;
     if (page < 1) page = 1;
     var offset = (page - 1) * size;
-    var w = whereClause();
+    var w = whereClause({ includePrefix: true });
     var sql =
       'SELECT p.ctime, p.prefix, p.title, s.code, s.name, s.note, s.t0_date, ' +
       's.t1_pct, s.t2_pct, s.t3_pct, s.t4_pct, s.t5_pct, s.cum5_pct, s.realized_days ' +
@@ -236,7 +348,14 @@ td.num{font-variant-numeric:tabular-nums;white-space:nowrap}
   function refresh() {
     $('err').hidden = true;
     loadStats();
+    loadPrefixStats();
     loadPage();
+  }
+
+  function selectPrefix(prefix) {
+    $('prefix').value = prefix || '';
+    page = 1;
+    refresh();
   }
 
   async function boot() {
@@ -253,12 +372,14 @@ td.num{font-variant-numeric:tabular-nums;white-space:nowrap}
       } catch (e) { /* empty */ }
       $('sub').textContent = '库内 push=' + nPush + ' · push_stock=' + nStock +
         ' · 口径：T0=新闻交易日收盘；上涨率=涨幅>0 / 已实现样本';
+      fillPrefixOptions();
       refresh();
     } catch (e) {
       $('sub').textContent = '加载失败';
       $('err').hidden = false;
       $('err').textContent = String(e && e.message ? e.message : e);
       $('tbody').innerHTML = '<tr><td colspan="12" class="mut">无法打开数据库</td></tr>';
+      $('prefixStats').innerHTML = '<tr><td colspan="8" class="mut">无法打开数据库</td></tr>';
     }
   }
 
@@ -267,14 +388,23 @@ td.num{font-variant-numeric:tabular-nums;white-space:nowrap}
     $('dateFrom').value = '';
     $('dateTo').value = '';
     $('code').value = '';
+    $('prefix').value = '';
     page = 1;
     refresh();
   });
+  $('prefix').addEventListener('change', function () { page = 1; refresh(); });
   $('prev').addEventListener('click', function () { if (page > 1) { page--; loadPage(); } });
   $('next').addEventListener('click', function () { page++; loadPage(); });
   $('pageSize').addEventListener('change', function () { page = 1; refresh(); });
   $('code').addEventListener('keydown', function (ev) {
     if (ev.key === 'Enter') { page = 1; refresh(); }
+  });
+  $('prefixStats').addEventListener('click', function (ev) {
+    var btn = ev.target && ev.target.closest ? ev.target.closest('.btn-prefix') : null;
+    if (!btn) return;
+    var p = btn.getAttribute('data-prefix') || '';
+    if ($('prefix').value === p) selectPrefix('');
+    else selectPrefix(p);
   });
 
   boot();
