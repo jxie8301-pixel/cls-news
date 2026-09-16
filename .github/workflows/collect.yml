@@ -34,7 +34,7 @@ jobs:
           curl -fsSL --retry 2 https://jxie8301-pixel.github.io/cls-news/research.json  -o data/research.json  || true
           curl -fsSL --retry 2 https://jxie8301-pixel.github.io/cls-news/status.json    -o out/status.json     || true
 
-      - name: 取回已推送记录 (data 分支)
+      - name: 取回已推送记录与股票池缓存 (data 分支)
         run: |
           git fetch origin data --depth 1 || true
           if git cat-file -e origin/data:pushed.json 2>/dev/null; then
@@ -42,6 +42,13 @@ jobs:
             echo "已取回 pushed.json"
           else
             echo "data 分支暂无 pushed.json，首次运行。"
+          fi
+          mkdir -p data/pools
+          if git cat-file -e origin/data:pools/all-a.json 2>/dev/null; then
+            git show origin/data:pools/all-a.json > data/pools/all-a.json
+            echo "已取回 pools/all-a.json（股票池日缓存）"
+          else
+            echo "data 分支暂无 pools/all-a.json，本轮将尝试在线拉取。"
           fi
 
       - name: 检查 MiniMax 密钥是否注入（不打印密钥）
@@ -75,14 +82,18 @@ jobs:
           echo "skipped=false" >> "$GITHUB_OUTPUT"
           exit $code
 
-      - name: 保存已推送记录 (data 分支)
+      - name: 保存已推送记录与股票池缓存 (data 分支)
         if: steps.collect.outputs.skipped != 'true'
         run: |
-          if [ ! -f data/pushed.json ]; then echo "无 pushed.json，跳过"; exit 0; fi
+          if [ ! -f data/pushed.json ] && [ ! -f data/pools/all-a.json ]; then
+            echo "无 pushed.json / pools 缓存，跳过"
+            exit 0
+          fi
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           tmp=$(mktemp -d)
-          cp data/pushed.json "$tmp/pushed.json"
+          [ -f data/pushed.json ] && cp data/pushed.json "$tmp/pushed.json"
+          [ -f data/pools/all-a.json ] && mkdir -p "$tmp/pools" && cp data/pools/all-a.json "$tmp/pools/all-a.json"
           git fetch origin data --depth 1 || true
           if git show-ref --verify --quiet refs/remotes/origin/data; then
             git checkout -B data origin/data
@@ -90,9 +101,13 @@ jobs:
             git checkout --orphan data
             git rm -rf . >/dev/null 2>&1 || true
           fi
-          cp "$tmp/pushed.json" pushed.json
-          git add pushed.json
-          git commit -m "update pushed.json [skip ci]" || echo "无变化，跳过提交"
+          [ -f "$tmp/pushed.json" ] && cp "$tmp/pushed.json" pushed.json && git add pushed.json
+          if [ -f "$tmp/pools/all-a.json" ]; then
+            mkdir -p pools
+            cp "$tmp/pools/all-a.json" pools/all-a.json
+            git add pools/all-a.json
+          fi
+          git commit -m "update pushed.json + pool cache [skip ci]" || echo "无变化，跳过提交"
           git push origin data
           git checkout -
 

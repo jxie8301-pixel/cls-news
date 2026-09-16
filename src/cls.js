@@ -175,14 +175,14 @@ async function fetchIndexConstituents(secuCode, { page = 100 } = {}) {
  * 取沪深两市全部上市公司（不含北交所）。
  * market=all 返回 5000+ 只，page 同样是"取前 page*30 条"，传 200 可一次拿全。
  */
-async function fetchAllStocks({ page = 200, market = 'all' } = {}) {
+async function fetchAllStocks({ page = 200, market = 'all', retries = 5, timeout = 60000 } = {}) {
   const body = await xquote('/web_quote/web_stock/stock_list', {
     types: 'last_px,change,tr,main_fund_diff,cmc,trade_status',
     market: market,
     way: 'change',
     page: page,
     rever: 1,
-  });
+  }, { retries: retries, timeout: timeout });
   const data = body && body.data;
   const list = (data && data.data) || [];
   const out = [];

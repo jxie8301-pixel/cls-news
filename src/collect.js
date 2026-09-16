@@ -65,7 +65,22 @@ function isStOrDelistName(name) {
   return /ST|退/.test(String(name || ''));
 }
 
-/** 同步沪深两市全部上市公司到 data/pools/<key>.json（key 默认 all-a）。 */
+function poolAgeHours(pool) {
+  if (!pool || !pool.capturedAt) return Infinity;
+  const t = Date.parse(pool.capturedAt);
+  if (!Number.isFinite(t)) return Infinity;
+  return (Date.now() - t) / 3600000;
+}
+
+function poolUsable(pool) {
+  return !!(pool && Array.isArray(pool.stocks) && pool.stocks.length);
+}
+
+/**
+ * 同步沪深两市全部上市公司到 data/pools/<key>.json（key 默认 all-a）。
+ * - 默认 TTL 24h：未过期直接复用本地缓存，少打 CLS。
+ * - 拉取失败时：若有缓存且未超过 stale 上限（默认 7 天），降级复用，避免 Action 空池 exit 1。
+ */
 async function syncMarketPool(opts) {
   opts = opts || {};
   const cfg = Object.assign(loadConfig(), opts);
@@ -74,30 +89,67 @@ async function syncMarketPool(opts) {
   const key = mp.key || 'all-a';
   const excludeSt = mp.excludeSt !== false && mp.exclude_st !== false;
   const name = mp.name || (excludeSt ? '沪深A股(非ST)' : '沪深A股');
+  const ttlHours = Number(mp.ttlHours != null ? mp.ttlHours : (cfg.poolTtlHours != null ? cfg.poolTtlHours : 24));
+  const staleHours = Number(mp.staleHours != null ? mp.staleHours : (cfg.poolStaleHours != null ? cfg.poolStaleHours : 168));
+  const cached = loadPool(key);
+  const ageH = poolAgeHours(cached);
+
+  if (poolUsable(cached) && ageH <= ttlHours) {
+    console.log('  [pool] ' + name + '：复用缓存 ' + cached.stocks.length + ' 只（年龄 '
+      + ageH.toFixed(1) + 'h ≤ TTL ' + ttlHours + 'h）');
+    return {
+      key: key,
+      name: cached.name || name,
+      count: cached.stocks.length,
+      droppedSt: cached.droppedSt || 0,
+      ok: true,
+      cached: true,
+    };
+  }
+
   const page = cfg.marketPageSize || 200;
-  const res = await cls.fetchAllStocks({ page: page, market: mp.market || 'all' });
-  const raw = res.stocks || [];
-  const stocks = excludeSt
-    ? raw.filter(function (s) { return s && s.code && !isStOrDelistName(s.name); })
-    : raw;
-  const dropped = raw.length - stocks.length;
-  savePool(key, {
-    key: key,
-    name: name,
-    code: key,
-    kind: 'market',
-    source: 'cls.cn /web_quote/web_stock/stock_list?market=all'
-      + (excludeSt ? ' + name filter !/(ST|退)/' : ''),
-    excludeSt: excludeSt,
-    capturedAt: new Date().toISOString(),
-    count: stocks.length,
-    rawCount: raw.length,
-    droppedSt: dropped,
-    stocks: stocks,
-  });
-  console.log('  [pool] ' + name + '：全量 ' + raw.length + ' → 入池 ' + stocks.length
-    + (excludeSt ? '（按名称剔除 ST/退市 ' + dropped + ' 只）' : ''));
-  return { key: key, name: name, count: stocks.length, droppedSt: dropped, ok: true };
+  try {
+    const res = await cls.fetchAllStocks({ page: page, market: mp.market || 'all', retries: 5, timeout: 60000 });
+    const raw = res.stocks || [];
+    const stocks = excludeSt
+      ? raw.filter(function (s) { return s && s.code && !isStOrDelistName(s.name); })
+      : raw;
+    const dropped = raw.length - stocks.length;
+    savePool(key, {
+      key: key,
+      name: name,
+      code: key,
+      kind: 'market',
+      source: 'cls.cn /web_quote/web_stock/stock_list?market=all'
+        + (excludeSt ? ' + name filter !/(ST|退)/' : ''),
+      excludeSt: excludeSt,
+      capturedAt: new Date().toISOString(),
+      count: stocks.length,
+      rawCount: raw.length,
+      droppedSt: dropped,
+      stocks: stocks,
+    });
+    console.log('  [pool] ' + name + '：全量 ' + raw.length + ' → 入池 ' + stocks.length
+      + (excludeSt ? '（按名称剔除 ST/退市 ' + dropped + ' 只）' : ''));
+    return { key: key, name: name, count: stocks.length, droppedSt: dropped, ok: true, cached: false };
+  } catch (err) {
+    const msg = String((err && err.message) || err);
+    if (poolUsable(cached) && ageH <= staleHours) {
+      console.warn('  [pool] ' + name + '：拉取失败（' + msg + '），降级复用缓存 '
+        + cached.stocks.length + ' 只（年龄 ' + ageH.toFixed(1) + 'h ≤ stale ' + staleHours + 'h）');
+      return {
+        key: key,
+        name: cached.name || name,
+        count: cached.stocks.length,
+        droppedSt: cached.droppedSt || 0,
+        ok: true,
+        cached: true,
+        degraded: true,
+        error: msg,
+      };
+    }
+    throw err;
+  }
 }
 
 /** 同步全部股票池：沪深全量 + config.indexPools 里声明的指数。 */

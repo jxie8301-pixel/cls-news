@@ -13,7 +13,9 @@
     "key": "all-a",
     "name": "沪深A股(非ST)",
     "market": "all",
-    "excludeSt": true
+    "excludeSt": true,
+    "ttlHours": 24,
+    "staleHours": 168
   },
   "marketPageSize": 200,
   "research": { "enabled": true, "refreshHours": 24, "concurrency": 5 },
