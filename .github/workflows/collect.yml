@@ -34,7 +34,10 @@ jobs:
           curl -fsSL --retry 2 https://jxie8301-pixel.github.io/cls-news/research.json  -o data/research.json  || true
           curl -fsSL --retry 2 https://jxie8301-pixel.github.io/cls-news/status.json    -o out/status.json     || true
 
-      - name: 取回已推送记录与股票池缓存 (data 分支)
+      - name: 安装 sqlite3 CLI
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sqlite3
+
+      - name: 取回已推送记录、股票池与推送库 (data 分支)
         run: |
           git fetch origin data --depth 1 || true
           if git cat-file -e origin/data:pushed.json 2>/dev/null; then
@@ -49,6 +52,12 @@ jobs:
             echo "已取回 pools/all-a.json（股票池日缓存）"
           else
             echo "data 分支暂无 pools/all-a.json，本轮将尝试在线拉取。"
+          fi
+          if git cat-file -e origin/data:pushes.db 2>/dev/null; then
+            git show origin/data:pushes.db > data/pushes.db
+            echo "已取回 pushes.db（推送归档）"
+          else
+            echo "data 分支暂无 pushes.db，本轮成功推送后会新建。"
           fi
 
       - name: 检查 MiniMax 密钥是否注入（不打印密钥）
@@ -82,11 +91,11 @@ jobs:
           echo "skipped=false" >> "$GITHUB_OUTPUT"
           exit $code
 
-      - name: 保存已推送记录与股票池缓存 (data 分支)
+      - name: 保存已推送记录、股票池与推送库 (data 分支)
         if: steps.collect.outputs.skipped != 'true'
         run: |
-          if [ ! -f data/pushed.json ] && [ ! -f data/pools/all-a.json ]; then
-            echo "无 pushed.json / pools 缓存，跳过"
+          if [ ! -f data/pushed.json ] && [ ! -f data/pools/all-a.json ] && [ ! -f data/pushes.db ]; then
+            echo "无 pushed.json / pools / pushes.db，跳过"
             exit 0
           fi
           git config user.name  "github-actions[bot]"
@@ -94,6 +103,7 @@ jobs:
           tmp=$(mktemp -d)
           [ -f data/pushed.json ] && cp data/pushed.json "$tmp/pushed.json"
           [ -f data/pools/all-a.json ] && mkdir -p "$tmp/pools" && cp data/pools/all-a.json "$tmp/pools/all-a.json"
+          [ -f data/pushes.db ] && cp data/pushes.db "$tmp/pushes.db"
           git fetch origin data --depth 1 || true
           if git show-ref --verify --quiet refs/remotes/origin/data; then
             git checkout -B data origin/data
@@ -107,7 +117,11 @@ jobs:
             cp "$tmp/pools/all-a.json" pools/all-a.json
             git add pools/all-a.json
           fi
-          git commit -m "update pushed.json + pool cache [skip ci]" || echo "无变化，跳过提交"
+          if [ -f "$tmp/pushes.db" ]; then
+            cp "$tmp/pushes.db" pushes.db
+            git add pushes.db
+          fi
+          git commit -m "update pushed + pool + pushes.db [skip ci]" || echo "无变化，跳过提交"
           git push origin data
           git checkout -
 

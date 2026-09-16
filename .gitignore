@@ -7,6 +7,8 @@ data/watchlist.json
 data/research.json
 data/technical.json
 data/pushed.json
+data/pushes.db
+data/pushes.db-*
 
 # 含口令的本地配置
 config.json

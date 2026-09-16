@@ -8,6 +8,7 @@
  *   2. 用 VIP 列表中同 id 的 title / brief 覆盖推送标题与摘要（个股侧标题摘要不准）
  *   3. 调用 MiniMax 为每只标的生成一句话（独特标签+热点+硬连接+边界）；失败则回退 research 题材
  *   4. 按板块分组，以 markdown 推送到企业微信
+ *   5. 发送成功后写入 data/pushes.db（新闻时间/栏目/标题/摘要/个股一句话）
  *
  * 文本格式示例（msgtype=markdown）：
  *   **[09-15 10:51]【盘中宝】**完整标题正文（仅时间+栏目加粗）
@@ -18,6 +19,7 @@
  *   - **东材科技**(601208)：一句话描述
  *
  * 去重：data/pushed.json（文章 id）
+ * 归档：data/pushes.db（SQLite，存于 data 分支）
  * webhook：环境变量 WECOM_WEBHOOK > config.wecomWebhook
  */
 
@@ -28,6 +30,7 @@ const collectMod = require('./collect.js');
 const research = require('./research.js');
 const cls = require('./cls.js');
 const minimax = require('./minimax.js');
+const pushDb = require('./push_db.js');
 
 const PUSHED_FILE = path.join(collectMod.DATA_DIR, 'pushed.json');
 const RETENTION_DAYS = 60;
@@ -237,6 +240,49 @@ function formatArticle(article, cache, notes) {
   return lines.join('\n').replace(/\s+$/, '') + '\n';
 }
 
+/** 推送成功后写入 SQLite 的个股行。 */
+function buildStockArchiveRows(article, cache, notes) {
+  notes = notes || {};
+  const out = [];
+  for (const s of article.stocks || []) {
+    const code = pureCode(s.code);
+    if (!code) continue;
+    const ai = notes[code] || '';
+    const fallback = themeOf(cache, s.code) || '';
+    out.push({
+      code: code,
+      name: s.name || '',
+      board: boardOf(s.code),
+      note: ai || fallback,
+      note_source: ai ? 'ai' : (fallback ? 'theme' : ''),
+    });
+  }
+  return out;
+}
+
+function resolvePrefix(article) {
+  const fromTitle = cls.titlePrefix(article && article.title);
+  if (fromTitle) return fromTitle;
+  if (article && article.prefix) return String(article.prefix).trim();
+  return '';
+}
+
+function archivePush(article, cache, notes) {
+  try {
+    pushDb.upsertPush({
+      article_id: String(article.id),
+      ctime: Number(article.ctime) || 0,
+      prefix: resolvePrefix(article),
+      title: String(article.title || '').trim(),
+      brief: String(article.text || '').replace(/\s+/g, ' ').trim(),
+      stocks: buildStockArchiveRows(article, cache, notes),
+    });
+    console.log('  [notify] 已归档 pushes.db article=' + article.id);
+  } catch (e) {
+    console.error('  [notify] 归档 SQLite 失败（不影响推送去重）: ' + (e && e.message ? e.message : e));
+  }
+}
+
 /* --------------------------------------------------------------- 网络发送 */
 
 function sendWecomMarkdown(webhook, content) {
@@ -353,6 +399,7 @@ async function pushNew(rows, opts) {
     const ok = await sendWecomMarkdown(webhook, content);
     if (ok) {
       pushedStore.ids[a.id] = a.ctime || Math.floor(Date.now() / 1000);
+      archivePush(a, cache, notes);
       pushed++;
       await sleep(500);
     } else {
@@ -373,6 +420,7 @@ module.exports = {
   themeOf: themeOf,
   groupByArticle: groupByArticle,
   formatArticle: formatArticle,
+  buildStockArchiveRows: buildStockArchiveRows,
   loadPushed: loadPushed,
   savePushed: savePushed,
   loadVipMap: loadVipMap,
