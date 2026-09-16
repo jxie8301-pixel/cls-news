@@ -165,6 +165,24 @@ function applyVipOverlay(articles, vipMap) {
 
 /* ----------------------------------------------------------- 格式化 */
 
+/** 企微 markdown 官方上限 4096 字节；预留页眉/续页标记余量 */
+const WECOM_MD_MAX_BYTES = 4096;
+const WECOM_MD_SAFE_BYTES = 3800;
+
+function utf8Len(s) {
+  return Buffer.byteLength(String(s == null ? '' : s), 'utf8');
+}
+
+/** 按 UTF-8 字节截断，不拆多字节字符 */
+function truncateUtf8(s, maxBytes) {
+  const str = String(s == null ? '' : s);
+  if (utf8Len(str) <= maxBytes) return str;
+  const buf = Buffer.from(str, 'utf8');
+  let end = Math.max(0, maxBytes);
+  while (end > 0 && (buf[end] & 0xc0) === 0x80) end--;
+  return buf.slice(0, end).toString('utf8').replace(/\uFFFD$/g, '') + '…';
+}
+
 function fmtPushTime(sec) {
   const d = new Date(sec * 1000);
   const p = function (n) { return String(n).padStart(2, '0'); };
@@ -188,38 +206,28 @@ function splitTitleLead(title, prefixHint) {
   return { lead: '', rest: t };
 }
 
-/**
- * @param {object} article
- * @param {object} cache      research 缓存
- * @param {Record<string,string>} notes  MiniMax 一句话 {纯数字code: desc}
- */
-function formatArticle(article, cache, notes) {
-  notes = notes || {};
-  // 标题/摘要完整展示，不做字数截断或「…」省略（企微 markdown 上限约 4096 字节）
+function buildHeadBlock(article) {
   const title = String(article.title || '').trim();
   const time = fmtPushTime(article.ctime);
   const parts = splitTitleLead(title, article.prefix);
-  // 仅加粗「[时间]【栏目】」，正文不加粗
   const headLine = parts.lead
     ? ('**' + time + parts.lead + '**' + parts.rest)
     : ('**' + time + '**' + parts.rest);
-
-  const lines = [];
-  // 企业微信 markdown：时间+栏目加粗、摘要引用、板块加粗、个股无序列表
-  lines.push(headLine);
-  lines.push('');
   const brief = String(article.text || '').replace(/\s+/g, ' ').trim();
-  lines.push('> 摘要: ' + brief);
-  lines.push('');
+  return (headLine + '\n\n> 摘要: ' + brief + '\n').replace(/\s+$/, '') + '\n';
+}
 
+function buildStockLines(article, cache, notes) {
+  notes = notes || {};
   const groups = {};
-  for (const s of article.stocks) {
+  for (const s of article.stocks || []) {
     const b = boardOf(s.code);
     (groups[b] = groups[b] || []).push(s);
   }
   const ordered = BOARD_ORDER.filter(function (b) { return groups[b] && groups[b].length; });
   Object.keys(groups).forEach(function (b) { if (ordered.indexOf(b) < 0) ordered.push(b); });
 
+  const lines = [];
   for (const board of ordered) {
     lines.push('**' + board + '：**');
     for (const s of groups[board]) {
@@ -227,17 +235,114 @@ function formatArticle(article, cache, notes) {
       const name = s.name || '';
       const ai = (code && notes[code]) || '';
       const fallback = themeOf(cache, s.code) || '';
-      const desc = ai || fallback;
-      // AI 成功 vs 题材回退：回退用灰色标注
+      let desc = ai || fallback;
       const mark = ai ? '' : (fallback ? '<font color="comment">(题材)</font> ' : '');
       const tag = code
         ? '**' + name + '**(' + code + ')'
         : '**' + name + '**';
-      lines.push('- ' + tag + '：' + mark + desc);
+      let line = '- ' + tag + '：' + mark + desc;
+      // 单行也不允许超过安全上限（极端长一句话）
+      if (utf8Len(line) > WECOM_MD_SAFE_BYTES - 80) {
+        const budget = Math.max(40, WECOM_MD_SAFE_BYTES - 80 - utf8Len('- ' + tag + '：' + mark));
+        desc = truncateUtf8(desc, budget);
+        line = '- ' + tag + '：' + mark + desc;
+      }
+      lines.push(line);
     }
     lines.push('');
   }
-  return lines.join('\n').replace(/\s+$/, '') + '\n';
+  return lines;
+}
+
+function buildContinueHeader(article, page, totalPages) {
+  const title = String(article.title || '').trim();
+  const time = fmtPushTime(article.ctime);
+  const parts = splitTitleLead(title, article.prefix);
+  const lead = parts.lead || '';
+  const restShort = truncateUtf8(parts.rest || title, 60);
+  return '**(续 ' + page + '/' + totalPages + ')** **' + time + lead + '**' + restShort + '\n\n';
+}
+
+/**
+ * 将一文拆成多条 markdown，每条 UTF-8 字节 ≤ WECOM_MD_SAFE_BYTES。
+ * @returns {string[]}
+ */
+function splitWecomMarkdownMessages(article, cache, notes) {
+  let head = buildHeadBlock(article);
+  if (utf8Len(head) > WECOM_MD_SAFE_BYTES) {
+    // 摘要过长：保标题，压摘要
+    const title = String(article.title || '').trim();
+    const time = fmtPushTime(article.ctime);
+    const parts = splitTitleLead(title, article.prefix);
+    const headLine = parts.lead
+      ? ('**' + time + parts.lead + '**' + parts.rest)
+      : ('**' + time + '**' + parts.rest);
+    const fixed = headLine + '\n\n> 摘要: ';
+    const budget = WECOM_MD_SAFE_BYTES - utf8Len(fixed) - 2;
+    const brief = truncateUtf8(String(article.text || '').replace(/\s+/g, ' ').trim(), Math.max(20, budget));
+    head = fixed + brief + '\n';
+  }
+
+  const stockLines = buildStockLines(article, cache, notes);
+  // 先估算需要几页：用占位续页头的保守长度
+  const probeHdr = buildContinueHeader(article, 99, 99);
+  const bodyBudgetFirst = WECOM_MD_SAFE_BYTES - utf8Len(head);
+  const bodyBudgetCont = WECOM_MD_SAFE_BYTES - utf8Len(probeHdr);
+
+  const pages = [];
+  let cur = [];
+  let curLen = 0;
+  let isFirst = true;
+  let budget = bodyBudgetFirst;
+
+  function flush() {
+    if (!cur.length && pages.length) return;
+    pages.push(cur);
+    cur = [];
+    curLen = 0;
+    isFirst = false;
+    budget = bodyBudgetCont;
+  }
+
+  for (const line of stockLines) {
+    const add = utf8Len(line) + (cur.length ? 1 : 0); // +1 for \n
+    if (cur.length && curLen + add > budget) flush();
+    // 空板块行等极短行
+    if (!cur.length && add > budget) {
+      cur.push(truncateUtf8(line, budget));
+      curLen = utf8Len(cur[0]);
+      flush();
+      continue;
+    }
+    cur.push(line);
+    curLen += add;
+  }
+  if (cur.length || !pages.length) pages.push(cur);
+
+  const total = pages.length;
+  const out = [];
+  for (let i = 0; i < total; i++) {
+    const body = pages[i].join('\n').replace(/\s+$/, '');
+    if (i === 0) {
+      out.push((head + (body ? body + '\n' : '')).replace(/\s+$/, '') + '\n');
+    } else {
+      out.push((buildContinueHeader(article, i + 1, total) + body + '\n').replace(/\s+$/, '') + '\n');
+    }
+    // 最终兜底再截一次（理论上不应触发）
+    if (utf8Len(out[i]) > WECOM_MD_MAX_BYTES) {
+      out[i] = truncateUtf8(out[i], WECOM_MD_MAX_BYTES - 3) + '…\n';
+    }
+  }
+  return out;
+}
+
+/**
+ * @param {object} article
+ * @param {object} cache      research 缓存
+ * @param {Record<string,string>} notes  MiniMax 一句话 {纯数字code: desc}
+ */
+function formatArticle(article, cache, notes) {
+  return splitWecomMarkdownMessages(article, cache, notes).join('\n');
 }
 
 /** 推送成功后写入 SQLite 的个股行。 */
@@ -388,22 +493,36 @@ async function pushNew(rows, opts) {
       console.log('[minimax] article ' + a.id + ' AI notes=' + noteCount);
     }
 
-    const content = formatArticle(a, cache, notes);
+    const messages = splitWecomMarkdownMessages(a, cache, notes);
+    const totalBytes = messages.reduce(function (n, m) { return n + utf8Len(m); }, 0);
+    console.log('  [notify] article ' + a.id + ' wecom parts=' + messages.length +
+      ' bytes=' + totalBytes +
+      messages.map(function (m, i) { return ' p' + (i + 1) + '=' + utf8Len(m); }).join(''));
 
     if (dryRun) {
-      console.log('----- [dry-run] 将推送 -----\n' + content);
+      messages.forEach(function (m, i) {
+        console.log('----- [dry-run] 将推送 (' + (i + 1) + '/' + messages.length + ') -----\n' + m);
+      });
       pushed++;
       continue;
     }
 
-    const ok = await sendWecomMarkdown(webhook, content);
-    if (ok) {
+    let okAll = true;
+    for (let i = 0; i < messages.length; i++) {
+      const ok = await sendWecomMarkdown(webhook, messages[i]);
+      if (!ok) {
+        okAll = false;
+        console.log('[minimax] wecom send failed for article ' + a.id +
+          ' part ' + (i + 1) + '/' + messages.length + '（未写入 pushed，下次仍会重试）');
+        break;
+      }
+      if (i + 1 < messages.length) await sleep(500);
+    }
+    if (okAll) {
       pushedStore.ids[a.id] = a.ctime || Math.floor(Date.now() / 1000);
       archivePush(a, cache, notes);
       pushed++;
       await sleep(500);
-    } else {
-      console.log('[minimax] wecom send failed for article ' + a.id + '（未写入 pushed，下次仍会重试）');
     }
   }
 
@@ -415,11 +534,16 @@ async function pushNew(rows, opts) {
 
 module.exports = {
   PUSHED_FILE: PUSHED_FILE,
+  WECOM_MD_MAX_BYTES: WECOM_MD_MAX_BYTES,
+  WECOM_MD_SAFE_BYTES: WECOM_MD_SAFE_BYTES,
   boardOf: boardOf,
   pureCode: pureCode,
   themeOf: themeOf,
+  utf8Len: utf8Len,
+  truncateUtf8: truncateUtf8,
   groupByArticle: groupByArticle,
   formatArticle: formatArticle,
+  splitWecomMarkdownMessages: splitWecomMarkdownMessages,
   buildStockArchiveRows: buildStockArchiveRows,
   loadPushed: loadPushed,
   savePushed: savePushed,
