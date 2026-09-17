@@ -6,8 +6,7 @@
  *
  * 必须走 Responses API：POST {base_url}/responses
  *   + tools: [{type: web_search}]
- *   + tool_choice 强制先联网检索，再写「可核实特色+热点+硬连接+边界」。
- * /chat/completions 无托管联网，旧实现不会搜索。
+ *   + tool_choice 强制联网；一句话以本条 VIP 时效与连接硬度为主轴。
  *
  * 失败/未配置时返回 {}，由 notify 回退到 research 题材描述。
  */
@@ -26,54 +25,48 @@ const RETRIABLE_HTTP = new Set([408, 409, 425, 429, 500, 502, 503, 504]);
 const STYLE_PREFIX_RE = /^(?:稀缺卡位型|订单催化型|转型重估型|卖铲人型)[，,：:\s]*/;
 /** 强词告警（不自动作废，便于日志复查） */
 const STRONG_CLAIM_RE = /独家|唯一|首家|市占第一|超九成|全球仅有|业绩弹性直接|量价齐升|(?:6G|5G-A).{0,12}(?:直接供货|批量供货|量产)/;
+/** 后处理：拦截「××年起累计/签订」类存量起笔（不在提示词里点名，以免诱发） */
+const CUM_FROM_YEAR_RE = /((?:19|20)\d{2})\s*年(?:起|以来)(?:累计|合计|签订|已签|批产)/;
 
-const PROMPT_TEMPLATE = `你是一名A股短线投研助理。推送行已带「公司名(代码)-」，你只写破折号后的**一句话**，不要再写公司名/代码。
+const PROMPT_TEMPLATE = `你是 A 股短线推送助理。推送行已有「公司名(代码)-」，你只写破折号后**一句话**（30–100 字），不要重复公司名/代码。
 
-核心目标：让人一眼看懂——它凭什么特殊、为什么现在和这个热点有关、关联有多真。
-公式：**可核实特色 + 当前热点标签 + 硬连接/受益路径 + 验证点或边界**。
-禁止「AI+教育」「机器人+新能源」这类概念拼接；删掉热点词后公司仍应有特色，删掉公司名后不能套到任意题材股。
-篇幅优先服务「本条新闻为什么现在看它」，不要把一句话写成旧年报摘录。
+{asof_block}
 
-## 写作前请联网检索核实（逐只，按此顺序）
-1. 本条 VIP：涨价/订单/政策/评级等与该股最相关的增量与进度。
-2. 公司最新已披露材料：优先最近一份年报或半年报（及之后的公告/互动易）；再补主营/产品/客户等特色。
-3. 热点层：结合本条 VIP，只提炼 1—2 个最相关热点词，不要堆砌。
-4. 连接硬度：先判断本条新闻对该股是「直接订单 / 客户验证 / 技术储备·预研 / 纯主题提及」哪一档；**一句话语气不得超过该硬度**（本条若写储备/探索，不得升格为量产供货或业绩弹性直接）。
-5. 连接层：尽量用可检索事实。无硬证据只能写「概念关联」。
+## 任务（按优先级）
+对每只股票，先判断它与**本条新闻**的关系，再落笔：
+1. **连接硬度（必做）**：本条对该股属于哪一档？
+   - 硬核：正文/事件直接涉及该公司业务、订单、涨价落地、客户、产能，或明确受益路径可核
+   - 偏硬：同产业链直接上下游，路径清楚但非主角
+   - 蹭概念：仅同主题/同板块提及，无直接业务或订单证据
+2. **一句话只回答**：此刻为何因本条而相关、连接有多真；业务身份一笔带过即可。
+3. 语气**不得超过**判定档位：硬核才可写直接受益/订单/涨价传导；蹭概念必须写明「主题相关/间接/概念关联」，禁止写成核心受益或业绩弹性直接。
 
-## 进度用词（必须遵守）
-- 技术储备/预研/跟踪 → 写「预研储备、跟踪标准」；禁止写「6G器件直接供货、6G量产」。
-- 样品/小批量/试点 → 写「样品验证、试点」；禁止写「核心受益、业绩弹性直接」。
-- 批量供货/中标/收入确认 → 才可写「直接供货、订单落地」。
+## 检索（联网，逐只）
+搜索应服务本条，推荐 query 形态：「公司名或代码 + 本条核心事件词」。
+只采信与本条逻辑相关、且对该股而言尽可能新的公开信息。
+默认**不要**为凑特色去检索多年经营数据；无必要可不写任何经营数字。
+若必须写数字：最多 1 个，且须直接支撑本条逻辑，并带披露时点（如本年×月公告、最新季报）。
 
-## 数字与报告期（必须遵守）
-- 收入、市占、件量、成本、订单金额、产能利用率等经营数字：必须有年报/半年报/公告/互动易依据，并**写明报告期**（如「2025年」「2026H1」）。
-- **优先最新已披露报告期**；当前日历年已过半年时，禁止把两年前的全年年报数字当作主句锚点（例如已是 2026 下半年仍主写裸「2024年××亿」）。
-- 一句话里经营数字**最多 1 个**；其余篇幅留给热点标签 + 与本条 VIP 的连接/边界。无可靠新数字时，宁可不写数字，改写业务卡位。
-- 「独家/唯一/首家/市占第一/全球仅有」：无原文依据禁止使用；可改用「滤波器龙头之一」「主设备商供应商」等可核表述。
+## 写法
+- 结构建议：本条关系（硬度相符）+ 必要业务卡位 + 近端验证点或边界。
+- 不确定就写边界，不编造客户/订单/市占/独家。
+- 禁止复述标题凑字；禁止空泛概念词堆砌。
 
-## 句式（100 字以内；优先写清，勿注水）
-直接写业务内容：特色 + 热点 + 路径 + 边界。
-可在内心组织叙事，但**正文不得出现**「稀缺卡位型」「订单催化型」「转型重估型」「卖铲人型」等类型名，也不要以类型名开头。
-验证点只能来自本条 VIP 已写明的进度，或检索到的公告/财报节点；没有就写边界（预研阶段、贡献尚早、概念关联偏强、取决于运营商资本开支等）。
-禁止：复述标题、编造未检索到的市占/客户/订单/占比、把蹭概念写成核心受益、空话注水凑字数、堆砌过时财报数字。
-
-## 新闻标题
+## 本条新闻标题
 {title}
 
-## 新闻摘要
+## 本条新闻摘要
 {brief}
 
-## 涉及个股（代码 名称）——请逐只联网检索后再写
+## 个股（代码 名称）
 {stock_lines}
 
-## 输出要求
-联网检索并归纳后，只输出**一个** JSON 代码块，键为 6 位股票代码，值为该股一句话。
-下方仅为**格式示意**，内容不得复用、不得照抄；第一句直接写业务特色：
+## 输出
+只输出一个 JSON 代码块：键为 6 位代码，值为该股一句话。不要输出其它文字。
 \`\`\`json
-{"000001": "<按四要素填写，不少于 30 字，不超过 100 字>"}
+{"000001": "<一句话>"}
 \`\`\`
-不要输出 JSON 以外的任何内容。`;
+`;
 
 function sleep(ms) {
   return new Promise(function (r) { setTimeout(r, ms); });
@@ -114,32 +107,63 @@ function stripThink(text) {
     .trim();
 }
 
-/** 剥句型标签前缀；强词/过旧报告期仅告警不丢弃 */
-function bjYearNow() {
-  return Number(new Intl.DateTimeFormat('en', {
+/**
+ * 北京时间「今天」——只注入时点，正提示；年份闸在后处理，不写进提示词以免诱发「选年份」。
+ */
+function asOfShanghai() {
+  const ymd = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Asia/Shanghai',
     year: 'numeric',
-  }).format(new Date()));
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date());
+  const year = Number(String(ymd).slice(0, 4));
+  const month = Number(String(ymd).slice(5, 7)) || 1;
+  const floorYear = month >= 5 ? year - 1 : year - 2;
+  const asofBlock = [
+    '写作时点：北京时间 **' + ymd + '**。',
+    '事实以本条新闻为主；补充信息须对该股尽可能新，且能直接说明与本条的关系。',
+  ].join('\n');
+  return {
+    ymd: ymd,
+    year: year,
+    month: month,
+    floorYear: floorYear,
+    asofBlock: asofBlock,
+  };
 }
 
-function warnStaleFiscalYears(code, text) {
-  const nowY = bjYearNow();
-  const staleBefore = nowY - 1; // 例如 2026 年仍主写 2024 及更早 → 告警
-  const re = /((?:19|20)\d{2})\s*年/g;
-  let m;
-  const seen = new Set();
-  while ((m = re.exec(text)) !== null) {
-    const y = Number(m[1]);
-    if (!Number.isFinite(y) || seen.has(y)) continue;
-    seen.add(y);
-    if (y < staleBefore) {
-      console.warn('[minimax] 过旧报告期告警 code=' + code + ' year=' + y +
-        ' note=' + text.slice(0, 80));
+/**
+ * 不合格判定：兜底拦截明显非「当前最新资料」的写法；主约束在提示词检索顺序。
+ * @returns {string|null}
+ */
+function staleNoteReason(text, asof) {
+  asof = asof || asOfShanghai();
+  const s = String(text || '');
+
+  // 1) 旧起点累计/签订：一律视为非「最新资料」叙事
+  const cum = CUM_FROM_YEAR_RE.exec(s);
+  if (cum) {
+    const y = Number(cum[1]);
+    if (Number.isFinite(y) && y < asof.year) {
+      return '旧起点累计/签订叙事（' + y + '年起，今天' + asof.ymd + '）';
     }
   }
+
+  // 2) 早于最新披露窗口的「××年」——不可能是当前最新主锚
+  const re = /((?:19|20)\d{2})\s*年/g;
+  let m;
+  while ((m = re.exec(s)) !== null) {
+    const y = Number(m[1]);
+    if (Number.isFinite(y) && y < asof.floorYear) {
+      return '早于最新披露窗口的报告期' + y + '（窗口≥' + asof.floorYear + '，今天' + asof.ymd + '）';
+    }
+  }
+  return null;
 }
 
-function polishNote(code, raw) {
+/** 剥句型标签；强词告警；非最新资料口径不合格则返回空串 */
+function polishNote(code, raw, asof) {
   let text = String(raw || '').trim();
   if (!text) return '';
   const stripped = text.replace(STYLE_PREFIX_RE, '').trim();
@@ -150,7 +174,12 @@ function polishNote(code, raw) {
   if (STRONG_CLAIM_RE.test(text)) {
     console.warn('[minimax] 强词告警 code=' + code + ' note=' + text.slice(0, 80));
   }
-  warnStaleFiscalYears(code, text);
+  const stale = staleNoteReason(text, asof);
+  if (stale) {
+    console.warn('[minimax] 非最新资料口径已丢弃 code=' + code + ' reason=' + stale +
+      ' note=' + text.slice(0, 80));
+    return '';
+  }
   return text;
 }
 
@@ -399,7 +428,8 @@ async function callResponses(cfg, prompt, webSearch, maxOutputTokens) {
 }
 
 /** 收尾轮：精简指令 + 证据，规则与首轮一致 */
-function buildFinalizePrompt(stocks, evidence) {
+function buildFinalizePrompt(stocks, evidence, asof) {
+  asof = asof || asOfShanghai();
   const codes = (stocks || [])
     .filter(function (s) { return s && s.code; })
     .map(function (s) {
@@ -407,41 +437,72 @@ function buildFinalizePrompt(stocks, evidence) {
     })
     .join('\n');
   return [
-    '现在请基于下方「已联网检索得到的资料」，为以下每只 A 股各写一句 100 字内的描述。',
-    '公式：可核实特色 + 热点 + 硬连接/路径 + 验证点或边界。',
-    '语气不得超过本条新闻连接硬度；储备/预研不得写成量产供货或业绩弹性直接。',
-    '无出处禁止写收入占比/市占/产能利用率等数字；禁止独家/唯一等无依据绝对化。',
-    '正文不得出现「稀缺卡位型」等句型类型名；第一句直接写业务特色。',
-    '若证据不足，写「概念关联/预研阶段/贡献尚早」等边界词，不得编造。',
-    '只输出一个 JSON 代码块，键为 6 位股票代码；下方仅为格式示意，内容不得复用：',
+    '根据下方已检索资料，为每只股票各写一句 30–100 字描述。',
+    asof.asofBlock,
+    '先判断与本条新闻是硬核 / 偏硬 / 蹭概念，语气不得超过该档；蹭概念须写明主题相关/间接，禁止写成核心受益。',
+    '一句话说明此刻因本条为何相关；不要堆经营数据。',
+    '只输出 JSON：键为 6 位代码，值为一句话。',
     '```json',
-    '{"000001": "<按四要素填写>"}',
+    '{"000001": "<一句话>"}',
     '```',
     '',
     '## 涉及个股',
     codes,
     '',
-    '## 已联网检索资料（请据此填写，禁止二次检索）',
-    evidence || '（无可用资料，按「概念关联」处理）',
+    '## 已联网检索资料',
+    evidence || '（无可用资料，按概念关联+边界处理）',
+  ].join('\n');
+}
+
+/** 不合格个股重写（不联网） */
+function buildRepairPrompt(stocks, badNotes, evidence, asof) {
+  asof = asof || asOfShanghai();
+  const lines = (stocks || []).map(function (s) {
+    const code = pureCode(s.code);
+    const bad = badNotes[code] || '';
+    return code + ' ' + sanitize(s.name, 40) +
+      (bad ? '\n  需改写: ' + sanitize(bad, 120) : '');
+  }).join('\n');
+  return [
+    '下列句子时效或口径不合格，请重写。',
+    asof.asofBlock,
+    '紧扣本条新闻与连接硬度；不要堆与本条无关的经营史数据。',
+    '只输出 JSON，键为 6 位代码。',
+    '```json',
+    '{"000001": "<一句话>"}',
+    '```',
+    '',
+    '## 待重写',
+    lines,
+    '',
+    '## 资料',
+    evidence || '（无额外资料，写本条关系+边界）',
   ].join('\n');
 }
 
 /**
  * @param {string} text
- * @param {Set<string>|null} allowCodes 若给定，只保留请求标的代码
+ * @param {Set<string>|null} allowCodes
+ * @param {object} [asof]
+ * @returns {{notes: Record<string,string>, rejected: Record<string,string>}|null}
  */
-function notesFromText(text, allowCodes) {
+function notesFromText(text, allowCodes, asof) {
+  asof = asof || asOfShanghai();
   const obj = extractJson(text);
   if (!obj || typeof obj !== 'object') return null;
-  const out = {};
+  const notes = {};
+  const rejected = {};
   for (const [k, v] of Object.entries(obj)) {
     const code = pureCode(k);
     if (!code || typeof v !== 'string' || !v.trim()) continue;
     if (allowCodes && !allowCodes.has(code)) continue;
-    const polished = polishNote(code, v);
-    if (polished) out[code] = polished;
+    const raw = String(v).trim();
+    const polished = polishNote(code, raw, asof);
+    if (polished) notes[code] = polished;
+    else if (staleNoteReason(raw, asof)) rejected[code] = raw;
   }
-  return Object.keys(out).length ? out : null;
+  if (!Object.keys(notes).length && !Object.keys(rejected).length) return null;
+  return { notes: notes, rejected: rejected };
 }
 
 /**
@@ -462,6 +523,9 @@ async function generateStockNotes(title, brief, stocks, config) {
     return {};
   }
 
+  const asof = asOfShanghai();
+  console.log('[minimax] 写作时点 asof=' + asof.ymd + ' latestFloorYear=' + asof.floorYear);
+
   const allowCodes = new Set();
   const stockLines = stocks
     .filter(function (s) { return s && s.code; })
@@ -473,6 +537,7 @@ async function generateStockNotes(title, brief, stocks, config) {
     .join('\n');
 
   const prompt = PROMPT_TEMPLATE
+    .replace('{asof_block}', asof.asofBlock)
     .replace('{title}', sanitize(title, 2000))
     .replace('{brief}', sanitize(brief, 4000))
     .replace('{stock_lines}', stockLines);
@@ -496,23 +561,55 @@ async function generateStockNotes(title, brief, stocks, config) {
   console.log('[minimax] 首轮完成 web_search_calls=' + searchCalls + ' status=' + (data.status || ''));
 
   let text = extractResponsesText(data);
-  let notes = notesFromText(text, allowCodes);
+  let parsed = notesFromText(text, allowCodes, asof);
+  let evidence = extractResponsesEvidence(data) || text || '（无额外资料）';
 
-  if (!notes && useSearch) {
-    console.log('[minimax] 首轮未产出 JSON，发起收尾调用（不联网，精简指令+检索证据）');
-    const evidence = extractResponsesEvidence(data) || text || '（无额外资料）';
-    const finalizePrompt = buildFinalizePrompt(stocks, evidence);
+  if ((!parsed || !Object.keys(parsed.notes).length) && useSearch) {
+    console.log('[minimax] 首轮未产出合格 JSON，发起收尾调用（不联网）');
+    const finalizePrompt = buildFinalizePrompt(stocks, evidence, asof);
     try {
       const data2 = await callResponses(cfg, finalizePrompt, false, cfg.maxOutputTokens);
       text = extractResponsesText(data2) || text;
-      notes = notesFromText(text, allowCodes);
+      parsed = notesFromText(text, allowCodes, asof);
       console.log('[minimax] 收尾完成 web_search_calls=' + countWebSearchCalls(data2));
     } catch (e) {
       console.error('[minimax] 收尾调用失败: ' + (e && e.message ? e.message : e));
     }
   }
 
-  if (!notes) {
+  let notes = (parsed && parsed.notes) || {};
+  let rejected = (parsed && parsed.rejected) || {};
+
+  // 过旧不合格：单次重写；仍失败则缺省，由 notify 回退题材句
+  const rejectCodes = Object.keys(rejected);
+  if (rejectCodes.length) {
+    console.warn('[minimax] 非最新口径不合格 codes=' + rejectCodes.join(',') + ' → 尝试重写一次');
+    const repairStocks = stocks.filter(function (s) {
+      return rejectCodes.indexOf(pureCode(s.code)) >= 0;
+    });
+    const repairAllow = new Set(rejectCodes);
+    try {
+      const data3 = await callResponses(
+        cfg,
+        buildRepairPrompt(repairStocks, rejected, evidence, asof),
+        false,
+        cfg.maxOutputTokens
+      );
+      const repaired = notesFromText(extractResponsesText(data3), repairAllow, asof);
+      if (repaired) {
+        Object.assign(notes, repaired.notes);
+        rejected = repaired.rejected;
+      }
+    } catch (e) {
+      console.error('[minimax] 过旧重写失败: ' + (e && e.message ? e.message : e));
+    }
+    const stillBad = Object.keys(rejected);
+    if (stillBad.length) {
+      console.warn('[minimax] 重写后仍非最新口径，回退题材句 codes=' + stillBad.join(','));
+    }
+  }
+
+  if (!Object.keys(notes).length) {
     console.error('[minimax] 回复无法解析为有效 JSON，前200字: ' + String(text || '').slice(0, 200));
     return {};
   }
@@ -526,6 +623,8 @@ module.exports = {
   pureCode: pureCode,
   sanitize: sanitize,
   polishNote: polishNote,
+  asOfShanghai: asOfShanghai,
+  staleNoteReason: staleNoteReason,
   extractJson: extractJson,
   extractResponsesText: extractResponsesText,
   extractResponsesEvidence: extractResponsesEvidence,
