@@ -76,11 +76,11 @@ tr.stock-row td{font-size:13px}
       <select id="prefix"><option value="">全部栏目</option></select>
     </div>
     <div class="field">
-      <label for="dateFrom">T0 起</label>
+      <label for="dateFrom">新闻日起</label>
       <input type="date" id="dateFrom">
     </div>
     <div class="field">
-      <label for="dateTo">T0 止</label>
+      <label for="dateTo">新闻日止</label>
       <input type="date" id="dateTo">
     </div>
     <div class="field">
@@ -133,7 +133,7 @@ tr.stock-row td{font-size:13px}
   </div>
 
   <div class="tab-panel" id="panelPrefix" role="tabpanel" aria-labelledby="tabPrefix" hidden>
-    <p class="hint">横向对比各栏目上涨率（不受上方「栏目」下拉限制）。点「查看」会筛选该栏目并跳到明细。</p>
+    <p class="hint">横向对比各栏目上涨率（不受上方「栏目」下拉限制；仍受新闻日/个股筛选）。点「查看」会筛选该栏目并跳到明细。</p>
     <div class="table-wrap">
       <table class="compact">
         <thead>
@@ -170,9 +170,8 @@ tr.stock-row td{font-size:13px}
     return String(s == null ? '' : s)
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
-  function ymdToKey(ymd) {
-    if (!ymd) return '';
-    return String(ymd).replace(/-/g, '');
+  function newsDayValue(elId) {
+    return String($(elId).value || '').trim();
   }
   function keyToDash(key) {
     var s = String(key || '');
@@ -222,12 +221,13 @@ tr.stock-row td{font-size:13px}
   function whereParts(opts) {
     opts = opts || {};
     var parts = [];
-    var from = ymdToKey($('dateFrom').value);
-    var to = ymdToKey($('dateTo').value);
+    var from = newsDayValue('dateFrom');
+    var to = newsDayValue('dateTo');
     var code = String($('code').value || '').trim().replace(/^[a-zA-Z]+/i, '');
     var prefix = String($('prefix').value || '');
-    if (from) parts.push("s.t0_date >= '" + escSql(from) + "'");
-    if (to) parts.push("s.t0_date <= '" + escSql(to) + "'");
+    // 按新闻发布日（Asia/Shanghai），不是 T0 交易日
+    if (from) parts.push("date(p.ctime, 'unixepoch', '+8 hours') >= '" + escSql(from) + "'");
+    if (to) parts.push("date(p.ctime, 'unixepoch', '+8 hours') <= '" + escSql(to) + "'");
     if (code) parts.push("s.code LIKE '%" + escSql(code) + "%'");
     if (opts.includePrefix !== false && prefix) {
       parts.push("p.prefix = '" + escSql(prefix) + "'");
@@ -397,12 +397,9 @@ tr.stock-row td{font-size:13px}
 
     var ids = arts.values.map(function (r) { return "'" + escSql(r[0]) + "'"; });
     var code = String($('code').value || '').trim().replace(/^[a-zA-Z]+/i, '');
-    var from = ymdToKey($('dateFrom').value);
-    var to = ymdToKey($('dateTo').value);
     var stockWhere = ['s.article_id IN (' + ids.join(',') + ')'];
     if (code) stockWhere.push("s.code LIKE '%" + escSql(code) + "%'");
-    if (from) stockWhere.push("s.t0_date >= '" + escSql(from) + "'");
-    if (to) stockWhere.push("s.t0_date <= '" + escSql(to) + "'");
+    // 日期已在文章层按新闻日筛过；同文个股共用 ctime，此处不再按 t0 裁切
     var stockSql =
       'SELECT s.article_id, s.code, s.name, s.note, s.t0_date, ' +
       's.t1_pct, s.t2_pct, s.t3_pct, s.t4_pct, s.t5_pct, s.cum5_pct ' +
