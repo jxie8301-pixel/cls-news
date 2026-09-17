@@ -39,6 +39,11 @@ td.rate{font-variant-numeric:tabular-nums;white-space:nowrap;font-weight:600}
 .pager{display:flex;align-items:center;gap:10px;margin-top:12px;flex-wrap:wrap}
 .err{color:var(--warn);padding:20px;background:#fff5f5;border:1px solid #ffd4d4;border-radius:8px}
 tr.active-prefix{background:var(--brandbg)}
+.tabs{display:flex;gap:0;border-bottom:1px solid var(--line);margin:4px 0 14px}
+.tabs button{border:0;background:transparent;padding:10px 16px;color:var(--dim);border-bottom:2px solid transparent;margin-bottom:-1px;border-radius:0}
+.tabs button:hover{color:var(--ink)}
+.tabs button.on{color:var(--brand);font-weight:600;border-bottom-color:var(--brand)}
+.tab-panel[hidden]{display:none !important}
 .view-toggle{display:inline-flex;gap:0;border:1px solid var(--line);border-radius:6px;overflow:hidden}
 .view-toggle button{border:0;border-radius:0;background:#fff;padding:6px 12px}
 .view-toggle button + button{border-left:1px solid var(--line)}
@@ -51,6 +56,7 @@ tr.stock-row td:first-child{padding-left:22px;color:#3b4149}
 tr.stock-row td{font-size:13px}
 .sec-row{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin:0 0 8px}
 .sec-row .sec{margin:0}
+.hint{font-size:12.5px;color:var(--dim);margin:-6px 0 10px}
 @media (max-width:760px){
   header,.wrap{padding-left:12px;padding-right:12px}
   .stat{min-width:90px;padding:8px 10px}
@@ -81,14 +87,6 @@ tr.stock-row td{font-size:13px}
       <label for="code">个股代码</label>
       <input type="search" id="code" placeholder="如 600519" autocomplete="off">
     </div>
-    <div class="field">
-      <label for="pageSize">每页</label>
-      <select id="pageSize">
-        <option value="20">20</option>
-        <option value="50" selected>50</option>
-        <option value="100">100</option>
-      </select>
-    </div>
     <button class="primary" id="btnQuery" type="button">查询</button>
     <button id="btnReset" type="button">重置</button>
   </div>
@@ -96,43 +94,63 @@ tr.stock-row td{font-size:13px}
   <div class="sec">当前筛选 · 合计上涨率</div>
   <div class="stats" id="stats"></div>
 
-  <div class="sec">按栏目 · T+1～T+5 上涨率</div>
-  <div class="table-wrap">
-    <table class="compact">
-      <thead>
-        <tr>
-          <th style="width:22%">栏目</th>
-          <th style="width:10%">样本</th>
-          <th style="width:11%">T+1</th>
-          <th style="width:11%">T+2</th>
-          <th style="width:11%">T+3</th>
-          <th style="width:11%">T+4</th>
-          <th style="width:11%">T+5</th>
-          <th style="width:13%">操作</th>
-        </tr>
-      </thead>
-      <tbody id="prefixStats"><tr><td colspan="8" class="mut">加载中…</td></tr></tbody>
-    </table>
+  <div class="tabs" role="tablist" aria-label="复盘视图">
+    <button type="button" role="tab" id="tabDetail" class="on" aria-selected="true" aria-controls="panelDetail">明细</button>
+    <button type="button" role="tab" id="tabPrefix" aria-selected="false" aria-controls="panelPrefix">栏目对照</button>
   </div>
 
-  <div class="sec-row">
-    <div class="sec">明细</div>
-    <div class="view-toggle" role="group" aria-label="明细视图">
-      <button type="button" id="viewNews" class="on">按新闻</button>
-      <button type="button" id="viewStock">按个股</button>
+  <div id="err" class="err" hidden></div>
+
+  <div class="tab-panel" id="panelDetail" role="tabpanel" aria-labelledby="tabDetail">
+    <div class="sec-row">
+      <div class="hint">按新闻分组查看推送明细；可切到按个股浏览</div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <div class="field" style="margin:0">
+          <label for="pageSize" class="mut" style="position:absolute;width:1px;height:1px;overflow:hidden">每页</label>
+          <select id="pageSize" title="每页条数">
+            <option value="20">20 / 页</option>
+            <option value="50" selected>50 / 页</option>
+            <option value="100">100 / 页</option>
+          </select>
+        </div>
+        <div class="view-toggle" role="group" aria-label="明细视图">
+          <button type="button" id="viewNews" class="on">按新闻</button>
+          <button type="button" id="viewStock">按个股</button>
+        </div>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead id="thead"></thead>
+        <tbody id="tbody"><tr><td colspan="12" class="mut">加载中…</td></tr></tbody>
+      </table>
+    </div>
+    <div class="pager">
+      <button id="prev" type="button" disabled>上一页</button>
+      <span id="pageInfo" class="mut">—</span>
+      <button id="next" type="button" disabled>下一页</button>
     </div>
   </div>
-  <div id="err" class="err" hidden></div>
-  <div class="table-wrap">
-    <table>
-      <thead id="thead"></thead>
-      <tbody id="tbody"><tr><td colspan="12" class="mut">加载中…</td></tr></tbody>
-    </table>
-  </div>
-  <div class="pager">
-    <button id="prev" type="button" disabled>上一页</button>
-    <span id="pageInfo" class="mut">—</span>
-    <button id="next" type="button" disabled>下一页</button>
+
+  <div class="tab-panel" id="panelPrefix" role="tabpanel" aria-labelledby="tabPrefix" hidden>
+    <p class="hint">横向对比各栏目上涨率（不受上方「栏目」下拉限制）。点「查看」会筛选该栏目并跳到明细。</p>
+    <div class="table-wrap">
+      <table class="compact">
+        <thead>
+          <tr>
+            <th style="width:22%">栏目</th>
+            <th style="width:10%">样本</th>
+            <th style="width:11%">T+1</th>
+            <th style="width:11%">T+2</th>
+            <th style="width:11%">T+3</th>
+            <th style="width:11%">T+4</th>
+            <th style="width:11%">T+5</th>
+            <th style="width:13%">操作</th>
+          </tr>
+        </thead>
+        <tbody id="prefixStats"><tr><td colspan="8" class="mut">加载中…</td></tr></tbody>
+      </table>
+    </div>
   </div>
 </div>
 <script src="https://cdn.jsdelivr.net/npm/sql.js@1.10.3/dist/sql-wasm.js"></script>
@@ -145,6 +163,7 @@ tr.stock-row td{font-size:13px}
   var totalStocks = 0;   // 统计样本（个股行）
   var pageTotal = 0;     // 当前视图分页总数（新闻篇数或个股行数）
   var viewMode = 'news'; // news | stock
+  var mainTab = 'detail'; // detail | prefix
 
   function $(id) { return document.getElementById(id); }
   function h(s) {
@@ -491,6 +510,17 @@ tr.stock-row td{font-size:13px}
     loadPage();
   }
 
+  function setMainTab(tab) {
+    mainTab = tab === 'prefix' ? 'prefix' : 'detail';
+    var isDetail = mainTab === 'detail';
+    $('tabDetail').classList.toggle('on', isDetail);
+    $('tabPrefix').classList.toggle('on', !isDetail);
+    $('tabDetail').setAttribute('aria-selected', isDetail ? 'true' : 'false');
+    $('tabPrefix').setAttribute('aria-selected', isDetail ? 'false' : 'true');
+    $('panelDetail').hidden = !isDetail;
+    $('panelPrefix').hidden = isDetail;
+  }
+
   function refresh() {
     $('err').hidden = true;
     loadStats();
@@ -498,10 +528,11 @@ tr.stock-row td{font-size:13px}
     loadPage();
   }
 
-  function selectPrefix(prefix) {
+  function selectPrefix(prefix, jumpDetail) {
     $('prefix').value = prefix || '';
     page = 1;
     refresh();
+    if (jumpDetail) setMainTab('detail');
   }
 
   async function boot() {
@@ -547,12 +578,14 @@ tr.stock-row td{font-size:13px}
   });
   $('viewNews').addEventListener('click', function () { setViewMode('news'); });
   $('viewStock').addEventListener('click', function () { setViewMode('stock'); });
+  $('tabDetail').addEventListener('click', function () { setMainTab('detail'); });
+  $('tabPrefix').addEventListener('click', function () { setMainTab('prefix'); });
   $('prefixStats').addEventListener('click', function (ev) {
     var btn = ev.target && ev.target.closest ? ev.target.closest('.btn-prefix') : null;
     if (!btn) return;
     var p = btn.getAttribute('data-prefix') || '';
-    if ($('prefix').value === p) selectPrefix('');
-    else selectPrefix(p);
+    if ($('prefix').value === p) selectPrefix('', false);
+    else selectPrefix(p, true);
   });
 
   boot();
