@@ -7,7 +7,8 @@
  * 必须走 Responses API：POST {base_url}/responses
  *   + tools: [{type: web_search}]
  *   + tool_choice 强制联网
- * 句式固定三截：本条关系（含硬度）+ 业务卡位一笔 + 近端验证。
+ * 句式固定三截：身份 + 本条匹配 + 一到两个事实。
+ * 事实必须是该股当下热点 / 当前主业 / 当前核心卡点，且最新仍有效。
  *
  * 失败/未配置时返回 {}，由 notify 回退到 research 题材描述。
  */
@@ -34,26 +35,28 @@ const PROMPT_TEMPLATE = `你是 A 股短线推送助理。推送行已有「公�
 {asof_block}
 
 ## 任务
-对每只股票：先判与**本条新闻**的连接硬度，再按固定三截写成一句（可用分号或逗号衔接，仍算一句）：
+对每只股票按三截写成一句（可用分号或逗号衔接，仍算一句）：
 
-1. **本条关系（含硬度，必有）**
-   - 硬核：正文/事件直接涉及该公司业务、订单、涨价落地、客户、产能，或明确受益路径可核
-   - 偏硬：同产业链直接上下游，路径清楚但非主角
-   - 蹭概念：仅同主题/同板块，无直接业务或订单证据 → 必须写明「主题相关/间接/概念关联」
-   - 语气**不得超过**判定档位；硬核才可写直接受益/订单/涨价传导；蹭概念禁止写成核心受益或业绩弹性直接
+1. **身份（必有）**：当前主业或平台定位，让人立刻认出是哪家。一文多股时必须能区分开。
 
-2. **业务卡位一笔（必有）**：该公司在本条主题里具体卡哪一环（产品/环节/客户侧），像问财式画像但只留一句身份，不写长对比
+2. **本条匹配（必有）**：它和本条新闻具体对上哪一点（产品/客户/环节）。不要复述整段标题。
 
-3. **近端验证（尽量有）**：最多 1～2 个与本条逻辑相关的近端事实（落地行业、订单、最新季报/半年报要点等），须能支撑「为何因本条相关」；搜不到就写边界（待验证/间接），禁止编造
+3. **一到两个事实（必有，本句成败在此）**：必须同时满足下面全部条件——
+   - **针对该股当下**：只允许写当前热点、当前主要业务、或当前核心卡点（产能/客户/在手订单/份额/管线进度/最新业绩兑现）
+   - **最新且仍有效**：以本条新闻、下方近端资料、联网检索到的最近一期财报/公告/互动易为准；过期订单、已结束项目、边角业务、多年前经营史一律不用
+   - 最多 2 个；宁缺一个合格事实，不要用旧故事凑数
+   - 平台型累计数据（在手合作、在研管线）仅当检索显示它仍是**当前**核心卡点才可写，写成「目前/已累计」现状，不要写「某某年起」
+   - 搜不到合格事实：只保留身份+本条匹配，并写「待验证」，禁止编造市占/订单/客户
 
 ## 检索（联网，逐只）
-推荐 query：「公司名或代码 + 本条核心事件词」；必要时再补「公司名 + 近季报/订单/业务」。
-只采信与本条相关、对该股尽可能新的公开信息。数字须带披露时点（如本年×月公告、最新季报）；不要堆多年经营史。
+优先 query：「公司名 + 本条核心事件词」；再补「公司名 + 最新半年报/年报」。
+只采信对该股此刻仍生效的公开信息。数字尽量带披露时点（本年×月公告、最新季报/半年报）。
 
 ## 禁止
-- 复述标题凑字；空泛概念词堆砌
-- 多段研报、双票对比、风险提示长文、尾部追问
+- 用行业/概念标签堆砌冒充事实（如「锂电池、CRO、人工智能」）
+- 复述标题凑字；与本条无关的历史故事
 - 编造客户/订单/市占/独家
+- 多段研报、双票对比、风险长文、尾部追问
 
 ## 本条新闻标题
 {title}
@@ -61,13 +64,13 @@ const PROMPT_TEMPLATE = `你是 A 股短线推送助理。推送行已有「公�
 ## 本条新闻摘要
 {brief}
 
-## 个股（代码 名称）
+## 个股（代码 名称；近端资料供挑选事实，不要照抄标签）
 {stock_lines}
 
 ## 输出
 只输出一个 JSON 代码块：键为 6 位代码，值为该股一句话。不要输出其它文字。
 \`\`\`json
-{"000001": "<本条关系（含硬度）；业务卡位一笔；近端验证>"}
+{"000001": "<身份；本条匹配；一到两个最新有效事实>"}
 \`\`\`
 `;
 
@@ -110,6 +113,70 @@ function stripThink(text) {
     .trim();
 }
 
+function researchOf(stock, cache) {
+  if (!stock || !cache || !cache.stocks) return null;
+  return cache.stocks[stock.code] || cache.stocks[pureCode(stock.code)] || null;
+}
+
+function pctBit(v, label) {
+  if (v == null || !Number.isFinite(Number(v))) return '';
+  const n = Number(v);
+  const num = Math.abs(n) >= 10 ? String(Math.round(n)) : n.toFixed(1);
+  return label + (n > 0 ? '+' : '') + num + '%';
+}
+
+/** 拼进 prompt 的近端资料：最新财务 + 最近事项，供模型挑「仍有效」的事实。 */
+function formatStockLine(stock, cache) {
+  const code = pureCode(stock && stock.code);
+  if (!code) return '';
+  let line = code + (stock.name ? ' ' + sanitize(stock.name, 60) : '');
+  const rec = researchOf(stock, cache);
+  if (!rec || rec.errorOnly) return line;
+  const bits = [];
+  if (rec.industry) bits.push('主业口径:' + sanitize(rec.industry, 40));
+  const f = rec.financial || {};
+  const fin = [pctBit(f.revenueYoy, '营收同比'), pctBit(f.profitYoy, '利润同比')].filter(Boolean);
+  if (fin.length) {
+    bits.push('最新财务' + (rec.asOfDate ? '(截至' + rec.asOfDate + ')' : '') + ':' + fin.join('、'));
+  }
+  const ev = pickNearEvent(rec);
+  if (ev && ev.title) {
+    bits.push('近端事项:' + String(ev.time || '').slice(0, 10) + ' ' + sanitize(shortTitleLike(ev.title), 42));
+  }
+  if (bits.length) line += '\n  ' + bits.join('；');
+  return line;
+}
+
+function shortTitleLike(title) {
+  return String(title || '')
+    .replace(/\s+/g, ' ')
+    .replace(/^.{2,32}?(?:股份有限公司|集团有限公司|有限公司)/, '')
+    .replace(/^关于/, '')
+    .replace(/的(?:自愿性披露)?公告$/, '')
+    .trim();
+}
+
+function pickNearEvent(rec) {
+  const lists = [rec && rec.keyEvents, rec && rec.announcements];
+  for (let i = 0; i < lists.length; i++) {
+    const list = lists[i];
+    if (!Array.isArray(list)) continue;
+    for (let j = 0; j < list.length; j++) {
+      const x = list[j];
+      if (x && x.title && !/股票交易异常波动/.test(x.title)) return x;
+    }
+  }
+  return null;
+}
+
+function buildStockBlock(stocks, cache) {
+  return (stocks || [])
+    .filter(function (s) { return s && s.code; })
+    .map(function (s) { return formatStockLine(s, cache); })
+    .filter(Boolean)
+    .join('\n');
+}
+
 /**
  * 北京时间「今天」——只注入时点，正提示；年份闸在后处理，不写进提示词以免诱发「选年份」。
  */
@@ -125,7 +192,7 @@ function asOfShanghai() {
   const floorYear = month >= 5 ? year - 1 : year - 2;
   const asofBlock = [
     '写作时点：北京时间 **' + ymd + '**。',
-    '事实以本条新闻为主；卡位与近端验证须对该股尽可能新，且直接服务本条关系。',
+    '一到两个事实必须是该股当前仍有效的热点、主业或核心卡点，不要用过期信息。',
   ].join('\n');
   return {
     ymd: ymd,
@@ -431,56 +498,51 @@ async function callResponses(cfg, prompt, webSearch, maxOutputTokens) {
 }
 
 /** 收尾轮：精简指令 + 证据，规则与首轮一致 */
-function buildFinalizePrompt(stocks, evidence, asof) {
+function buildFinalizePrompt(stocks, evidence, asof, cache) {
   asof = asof || asOfShanghai();
-  const codes = (stocks || [])
-    .filter(function (s) { return s && s.code; })
-    .map(function (s) {
-      return pureCode(s.code) + (s.name ? ' ' + sanitize(s.name, 60) : '');
-    })
-    .join('\n');
   return [
     '根据下方已检索资料，为每只股票各写一句 50–120 字描述。',
     asof.asofBlock,
-    '固定三截写进一句：本条关系（含硬度）+ 业务卡位一笔 + 近端验证（最多1～2个事实；无则写边界）。',
-    '先判硬核/偏硬/蹭概念，语气不得超过该档；蹭概念须写明主题相关/间接，禁止写成核心受益。',
+    '固定三截写进一句：身份 + 本条匹配 + 一到两个事实。',
+    '事实必须是该股当前热点、当前主业或当前核心卡点，且最新仍有效；没有合格事实就写待验证，禁止编造。',
     '不要写多段对比、风险长文或追问。',
     '只输出 JSON：键为 6 位代码，值为一句话。',
     '```json',
-    '{"000001": "<本条关系（含硬度）；业务卡位一笔；近端验证>"}',
+    '{"000001": "<身份；本条匹配；一到两个最新有效事实>"}',
     '```',
     '',
     '## 涉及个股',
-    codes,
+    buildStockBlock(stocks, cache) || '（无个股）',
     '',
     '## 已联网检索资料',
-    evidence || '（无可用资料：关系写蹭概念/间接 + 卡位从摘要推断 + 验证写边界）',
+    evidence || '（无可用资料：只写身份+本条匹配，事实写待验证）',
   ].join('\n');
 }
 
 /** 不合格个股重写（不联网） */
-function buildRepairPrompt(stocks, badNotes, evidence, asof) {
+function buildRepairPrompt(stocks, badNotes, evidence, asof, cache) {
   asof = asof || asOfShanghai();
   const lines = (stocks || []).map(function (s) {
+    const base = formatStockLine(s, cache);
     const code = pureCode(s.code);
     const bad = badNotes[code] || '';
-    return code + ' ' + sanitize(s.name, 40) +
-      (bad ? '\n  需改写: ' + sanitize(bad, 120) : '');
+    return (base || code) + (bad ? '\n  需改写: ' + sanitize(bad, 120) : '');
   }).join('\n');
   return [
     '下列句子时效或口径不合格，请重写。',
     asof.asofBlock,
-    '仍用三截一句：本条关系（含硬度）+ 业务卡位一笔 + 近端验证；不要堆与本条无关的经营史。',
+    '仍用三截一句：身份 + 本条匹配 + 一到两个事实。',
+    '事实必须是该股当前热点/主业/核心卡点且仍有效；去掉过期经营史。',
     '只输出 JSON，键为 6 位代码。',
     '```json',
-    '{"000001": "<本条关系（含硬度）；业务卡位一笔；近端验证>"}',
+    '{"000001": "<身份；本条匹配；一到两个最新有效事实>"}',
     '```',
     '',
     '## 待重写',
     lines,
     '',
     '## 资料',
-    evidence || '（无额外资料：关系+卡位+验证边界）',
+    evidence || '（无额外资料：身份+本条匹配，事实写待验证）',
   ].join('\n');
 }
 
@@ -512,7 +574,7 @@ function notesFromText(text, allowCodes, asof) {
 /**
  * @returns {Promise<Record<string,string>>} {纯数字代码: 一句话}
  */
-async function generateStockNotes(title, brief, stocks, config) {
+async function generateStockNotes(title, brief, stocks, config, cache) {
   const cfg = loadCfg(config);
   if (!cfg.enabled) {
     console.log('[minimax] 未启用（notify.minimax.enabled=false），跳过');
@@ -531,14 +593,11 @@ async function generateStockNotes(title, brief, stocks, config) {
   console.log('[minimax] 写作时点 asof=' + asof.ymd + ' latestFloorYear=' + asof.floorYear);
 
   const allowCodes = new Set();
-  const stockLines = stocks
-    .filter(function (s) { return s && s.code; })
-    .map(function (s) {
-      const code = pureCode(s.code);
-      if (code) allowCodes.add(code);
-      return code + ' ' + sanitize(s.name, 60);
-    })
-    .join('\n');
+  stocks.forEach(function (s) {
+    const code = pureCode(s && s.code);
+    if (code) allowCodes.add(code);
+  });
+  const stockLines = buildStockBlock(stocks, cache);
 
   const prompt = PROMPT_TEMPLATE
     .replace('{asof_block}', asof.asofBlock)
@@ -570,7 +629,7 @@ async function generateStockNotes(title, brief, stocks, config) {
 
   if ((!parsed || !Object.keys(parsed.notes).length) && useSearch) {
     console.log('[minimax] 首轮未产出合格 JSON，发起收尾调用（不联网）');
-    const finalizePrompt = buildFinalizePrompt(stocks, evidence, asof);
+    const finalizePrompt = buildFinalizePrompt(stocks, evidence, asof, cache);
     try {
       const data2 = await callResponses(cfg, finalizePrompt, false, cfg.maxOutputTokens);
       text = extractResponsesText(data2) || text;
@@ -595,7 +654,7 @@ async function generateStockNotes(title, brief, stocks, config) {
     try {
       const data3 = await callResponses(
         cfg,
-        buildRepairPrompt(repairStocks, rejected, evidence, asof),
+        buildRepairPrompt(repairStocks, rejected, evidence, asof, cache),
         false,
         cfg.maxOutputTokens
       );
@@ -633,5 +692,6 @@ module.exports = {
   extractResponsesText: extractResponsesText,
   extractResponsesEvidence: extractResponsesEvidence,
   notesFromText: notesFromText,
+  formatStockLine: formatStockLine,
   generateStockNotes: generateStockNotes,
 };

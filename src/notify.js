@@ -6,7 +6,7 @@
  * 流程：
  *   1. 个股扫描得到文章×股票 rows，按 articleId 聚合成一文一条
  *   2. 用 VIP 列表中同 id 的 title / brief 覆盖推送标题与摘要（个股侧标题摘要不准）
- *   3. 调用 MiniMax 为每只标的生成一句话（本条关系含硬度+业务卡位+近端验证）；失败则回退 research 题材
+ *   3. 调用 MiniMax 为每只标的生成一句话（身份+本条匹配+最新有效事实）；失败则回退 research 题材
  *   4. 按板块分组，以 markdown 推送到企业微信
  *   5. 发送成功后写入 data/pushes.db（新闻时间/栏目/标题/摘要/个股一句话）
  *
@@ -482,7 +482,7 @@ async function pushNew(rows, opts) {
 
     let notes = {};
     try {
-      notes = await minimax.generateStockNotes(a.title, a.text, a.stocks, cfg);
+      notes = await minimax.generateStockNotes(a.title, a.text, a.stocks, cfg, cache);
     } catch (e) {
       console.error('[minimax] notify exception: ' + (e && e.message ? e.message : e));
       notes = {};
