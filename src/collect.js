@@ -231,6 +231,50 @@ function saveStore(store) {
   fs.writeFileSync(STORE_FILE, JSON.stringify(store, null, 1), 'utf8');
 }
 
+/* ---------------------------------------------------------- 扫描节流 */
+
+function classifyScanError(msg) {
+  const s = String(msg || '');
+  if (/aborted|timeout|TimeoutExpired|timed out/i.test(s)) return 'timeout';
+  if (/fetch failed/i.test(s)) return 'fetch_failed';
+  const http = /HTTP\s+(\d+)/i.exec(s);
+  if (http) return 'http_' + http[1];
+  if (/JSON|Unexpected token/i.test(s)) return 'parse';
+  return 'other';
+}
+
+/** 间隔默认 80–150ms；配置 >150 时用配置值（便于临时放慢）。 */
+function nextScanDelayMs(cfg) {
+  const n = Number(cfg && (cfg.delayMs != null ? cfg.delayMs : cfg.requestDelayMs));
+  if (Number.isFinite(n) && n > 150) return n;
+  const lo = Number.isFinite(n) && n >= 80 ? n : 80;
+  return lo + Math.floor(Math.random() * (151 - lo));
+}
+
+function scanTimeoutMs(cfg) {
+  const m = Number(cfg && cfg.scanTimeoutMinutes);
+  const minutes = Number.isFinite(m) && m > 0 ? m : 10;
+  return minutes * 60 * 1000;
+}
+
+function logScanSummary(stats) {
+  const kinds = stats.errorKinds || {};
+  const order = ['fetch_failed', 'timeout', 'parse', 'other'];
+  console.log('[scan] ── 错误分类');
+  for (let i = 0; i < order.length; i++) {
+    const k = order[i];
+    console.log('[scan]   ' + k + '  ' + (kinds[k] || 0));
+  }
+  Object.keys(kinds).sort().forEach(function (k) {
+    if (order.indexOf(k) >= 0) return;
+    console.log('[scan]   ' + k + '  ' + kinds[k]);
+  });
+  console.log('[scan] ── 本轮');
+  console.log('[scan]   已抓 ' + stats.scanned + ' / ' + stats.stocks
+    + '  失败 ' + stats.errors
+    + (stats.aborted ? '  超时作废（不入库/不推送）' : ''));
+}
+
 /* ---------------------------------------------------------- 并发池 */
 
 async function runPool(items, worker, concurrency) {
@@ -314,15 +358,34 @@ async function collect(opts) {
   }
 
   const store = loadStore();
-  const stats = { stocks: targets.size, scanned: 0, listed: 0, prefixed: 0, matched: 0, newText: 0, errors: 0, pools: {} };
+  const stats = {
+    stocks: targets.size,
+    scanned: 0,
+    listed: 0,
+    prefixed: 0,
+    matched: 0,
+    newText: 0,
+    errors: 0,
+    aborted: false,
+    errorKinds: {},
+    pools: {},
+  };
   for (const k of wantedKeys) stats.pools[k] = { name: poolNames[k] || k, matched: 0 };
   const errors = [];
   const matchedIds = new Set();
-
+  const timeoutMs = scanTimeoutMs(cfg);
+  const deadline = Date.now() + timeoutMs;
   const items = Array.from(targets.values());
+  console.log('[scan] 并发 ' + Math.max(1, cfg.concurrency || 5)
+    + ' 间隔 80–150ms 超时 ' + (timeoutMs / 60000) + ' 分钟（超时则本轮作废）');
+
   await runPool(
     items,
     async function (stock) {
+      if (Date.now() >= deadline) {
+        stats.aborted = true;
+        return;
+      }
       try {
         const articles = await cls.fetchStockArticles(stock.code, { sinceSec: cutoff });
         stats.listed += articles.length;
@@ -350,16 +413,26 @@ async function collect(opts) {
           }
         }
       } catch (err) {
+        const msg = String((err && err.message) || err);
+        const kind = classifyScanError(msg);
         stats.errors++;
-        errors.push({ code: stock.code, name: stock.name, error: String((err && err.message) || err) });
+        stats.errorKinds[kind] = (stats.errorKinds[kind] || 0) + 1;
+        errors.push({ code: stock.code, name: stock.name, error: msg, kind: kind });
       } finally {
         stats.scanned++;
         if (cfg.onProgress) cfg.onProgress(stats, stock);
-        if (cfg.delayMs) await cls.sleep(cfg.delayMs);
+        await cls.sleep(nextScanDelayMs(cfg));
       }
     },
-    Math.max(1, cfg.concurrency || 4)
+    Math.max(1, cfg.concurrency || 5)
   );
+
+  logScanSummary(stats);
+  if (stats.aborted) {
+    console.log('[scan] 超过 scanTimeoutMinutes=' + (timeoutMs / 60000)
+      + ' 分钟，本轮作废：不入库、不推送、不抬 VIP 水位');
+    return { aborted: 'timeout', store: null, stats: stats, errors: errors };
+  }
 
   store.lastRun = { at: new Date().toISOString(), cutoff: cutoff, pools: wantedKeys, stats: stats, errors: errors.slice(0, 20) };
 

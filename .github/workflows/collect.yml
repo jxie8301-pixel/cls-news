@@ -88,6 +88,11 @@ jobs:
             echo "无新增 VIP，跳过后续推送与 Pages 发布"
             exit 0
           fi
+          if [ "$code" -eq 4 ]; then
+            echo "skipped=true" >> "$GITHUB_OUTPUT"
+            echo "扫描超时，本轮作废：不推送、不写水位、不发布 Pages"
+            exit 0
+          fi
           echo "skipped=false" >> "$GITHUB_OUTPUT"
           exit $code
 

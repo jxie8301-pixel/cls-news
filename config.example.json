@@ -4,8 +4,9 @@
   "refreshMinutes": 10,
   "schedulePolicy": true,
   "days": 1,
-  "concurrency": 6,
-  "requestDelayMs": 0,
+  "concurrency": 5,
+  "requestDelayMs": 80,
+  "scanTimeoutMinutes": 10,
   "syncPoolsOnStart": true,
   "constituentPageSize": 100,
   "marketPool": {

@@ -107,15 +107,41 @@ function siteLinks() { return process.argv.includes('--site-links'); }
         const now = Date.now();
         if (now - lastLog < 2000 && stats.scanned < stats.stocks) return;
         lastLog = now;
-        process.stdout.write('\r进度 ' + stats.scanned + '/' + stats.stocks + ' ｜ 新闻 ' + stats.listed + ' ｜ 带栏目前缀 ' + stats.prefixed + ' ｜ 命中目标 ' + stats.matched + ' ｜ 正文 ' + stats.newText + ' ｜ 失败 ' + stats.errors + '   ');
+        process.stdout.write('\r进度 ' + stats.scanned + '/' + stats.stocks
+          + ' ｜ 新闻 ' + stats.listed
+          + ' ｜ 带栏目前缀 ' + stats.prefixed
+          + ' ｜ 命中目标 ' + stats.matched
+          + ' ｜ 正文 ' + stats.newText
+          + ' ｜ 失败 ' + stats.errors
+          + (stats.aborted ? ' ｜ 超时作废' : '')
+          + '   ');
       },
     });
     const st = res.stats;
     console.log('');
-    console.log('完成：去重后 ' + st.stocks + ' 只股票 ｜ 读取新闻 ' + st.listed + ' 条 ｜ 带栏目前缀 ' + st.prefixed + ' 条 ｜ 命中目标栏目 ' + st.matched + ' 条 ｜ 抓到正文 ' + st.newText + ' 条 ｜ 失败 ' + st.errors + ' 只 ｜ 用时 ' + Math.round((Date.now() - t0) / 1000) + 's');
+    console.log((res.aborted ? '作废：' : '完成：')
+      + '去重后 ' + st.stocks + ' 只股票 ｜ 读取新闻 ' + st.listed + ' 条 ｜ 带栏目前缀 ' + st.prefixed
+      + ' 条 ｜ 命中目标栏目 ' + st.matched + ' 条 ｜ 抓到正文 ' + st.newText + ' 条 ｜ 失败 ' + st.errors
+      + ' 只 ｜ 用时 ' + Math.round((Date.now() - t0) / 1000) + 's');
     if (res.errors.length) {
-      console.log('失败明细（前 10）:');
-      res.errors.slice(0, 10).forEach(function (e) { console.log('  ' + e.code + ' ' + e.name + ' -> ' + e.error); });
+      const byKind = {};
+      res.errors.forEach(function (e) {
+        const k = e.kind || 'other';
+        (byKind[k] = byKind[k] || []).push(e);
+      });
+      console.log('[scan] ── 失败明细（每类最多 5 条）');
+      Object.keys(byKind).sort().forEach(function (k) {
+        byKind[k].slice(0, 5).forEach(function (e) {
+          console.log('[scan]   [' + k + '] ' + e.code + ' ' + e.name + ' -> ' + e.error);
+        });
+        if (byKind[k].length > 5) {
+          console.log('[scan]   [' + k + '] …另有 ' + (byKind[k].length - 5) + ' 条');
+        }
+      });
+    }
+    if (res.aborted) {
+      console.log('[scan] 本轮作废：不推送、不写水位、不发布。下轮全量重抓后再对照未推送新闻。');
+      process.exit(4);
     }
     console.log('');
   }
