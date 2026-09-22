@@ -6,7 +6,7 @@
   "days": 1,
   "concurrency": 5,
   "requestDelayMs": 80,
-  "scanTimeoutMinutes": 10,
+  "scanTimeoutMinutes": 15,
   "syncPoolsOnStart": true,
   "constituentPageSize": 100,
   "marketPool": {
