@@ -1,9 +1,8 @@
 name: 推送复盘 T+1～T+5
 
+# DISABLED 2026-09-22：已切流到 jxie8301-pixel/news-crawler。已去掉 schedule，jobs if:false。
 # 北京时间每天 03:00 ≈ UTC 19:00；与 collect 共用 pages 并发组，避免同时写 data / Pages。
 on:
-  schedule:
-    - cron: '0 19 * * *'
   workflow_dispatch:
 
 permissions:
@@ -17,6 +16,7 @@ concurrency:
 
 jobs:
   perf:
+    if: false
     runs-on: ubuntu-latest
     outputs:
       publish: ${{ steps.db.outputs.found }}
@@ -101,7 +101,7 @@ jobs:
 
   deploy:
     needs: perf
-    if: needs.perf.outputs.publish == 'true'
+    if: false
     runs-on: ubuntu-latest
     environment:
       name: github-pages

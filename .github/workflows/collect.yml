@@ -1,5 +1,6 @@
 name: 抓取 + 企业微信推送 + 发布 Pages
 
+# DISABLED 2026-09-22：已切流到 jxie8301-pixel/news-crawler。jobs 全部 if:false。
 # 「要不要跑」主要由外部 cls-trigger（VIP 水位 + 有标的）workflow_dispatch。
 # 本 workflow 再做 VIP 差集门控：相对上轮新增 0 条则跳过抓取/推送/Pages（exit 3 → soft skip）。
 # 不在 push 时触发，避免改代码就全量跑；需要强制全量可手动 dispatch 并加输入，或本地 --no-gate。
@@ -17,6 +18,7 @@ concurrency:
 
 jobs:
   build:
+    if: false
     runs-on: ubuntu-latest
     outputs:
       skipped: ${{ steps.collect.outputs.skipped }}
@@ -155,7 +157,7 @@ jobs:
 
   deploy:
     needs: build
-    if: needs.build.outputs.skipped != 'true'
+    if: false
     runs-on: ubuntu-latest
     environment:
       name: github-pages

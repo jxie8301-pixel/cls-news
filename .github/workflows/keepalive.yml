@@ -1,17 +1,15 @@
 name: 保活 commit（每月第一个周日）
 
+# DISABLED 2026-09-22：已切流到 jxie8301-pixel/news-crawler。已去掉 schedule，job if:false。
 on:
-  schedule:
-    # 每月 1~7 日中的周日 00:00 UTC = 北京时间 08:00
-    # 即"每月第一个周日早上 8 点"提交空 commit，防止 GitHub 因无活动暂停 schedule。
-    - cron: '0 0 1-7 * 0'
-  workflow_dispatch:  # 支持手动触发测试
+  workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
   keepalive:
+    if: false
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
