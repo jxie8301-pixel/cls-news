@@ -1,0 +1,10 @@
+config.json
+config.local.json
+data/
+out/
+_site/
+.site-publish/
+node_modules/
+*.log
+.cnb/envs.local.yml
+.cnb/envs.secret.yml

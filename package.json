@@ -1,0 +1,15 @@
+{
+  "name": "news-crawler-gha",
+  "private": true,
+  "description": "CNB collect 失败时的 GHA 备用：扫 VIP/个股 → Cloudflare D1",
+  "scripts": {
+    "collect": "node scripts/run-collect.js",
+    "gate": "node src/cli.js gate",
+    "scan": "node src/cli.js scan",
+    "merge": "node src/cli.js merge",
+    "post": "node src/cli.js post"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

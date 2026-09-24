@@ -1,0 +1,71 @@
+name: collect
+
+# CNB collect 硬失败时由 CNB dispatch；也可手动跑
+on:
+  workflow_dispatch:
+    inputs:
+      shards:
+        description: 分片数
+        required: false
+        default: "5"
+      force:
+        description: 忽略 VIP 差集
+        type: boolean
+        required: false
+        default: false
+      assume_new_vip:
+        description: 外部已确认有新 VIP
+        type: boolean
+        required: false
+        default: true
+      days:
+        description: 回溯天数
+        required: false
+        default: "1"
+
+concurrency:
+  group: gha-collect
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: collect → D1
+        env:
+          SHARDS: ${{ github.event.inputs.shards || '5' }}
+          FORCE: ${{ github.event.inputs.force || false }}
+          ASSUME_NEW_VIP: ${{ github.event.inputs.assume_new_vip || true }}
+          DAYS: ${{ github.event.inputs.days || '1' }}
+          D1_API_BASE: ${{ secrets.D1_API_BASE }}
+          D1_WRITE_TOKEN: ${{ secrets.D1_WRITE_TOKEN }}
+          D1_SOURCE: gha
+        run: |
+          set -e
+          test -n "$D1_WRITE_TOKEN" || { echo "missing D1_WRITE_TOKEN"; exit 1; }
+          export D1_API_BASE="${D1_API_BASE:-https://cls-news.jxie.ccwu.cc}"
+          cp config.example.json config.json
+          if [ -n "${DAYS:-}" ]; then
+            node -e "
+              const fs=require('fs');
+              const j=JSON.parse(fs.readFileSync('config.json','utf8'));
+              const d=parseInt(process.env.DAYS,10);
+              if (Number.isFinite(d)&&d>0) j.days=d;
+              if (j.days>=7) j.scanTimeoutMinutes=Math.max(j.scanTimeoutMinutes||15,25);
+              fs.writeFileSync('config.json', JSON.stringify(j,null,2));
+            "
+          fi
+          node scripts/run-collect.js
+      - name: upload out
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: out
+          path: out/
+          if-no-files-found: ignore
+          retention-days: 7
