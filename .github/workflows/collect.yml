@@ -7,7 +7,7 @@ on:
       shards:
         description: 分片数
         required: false
-        default: "5"
+        default: "4"
       force:
         description: 忽略 VIP 差集
         type: boolean
@@ -38,7 +38,7 @@ jobs:
           node-version: "24"
       - name: collect → D1
         env:
-          SHARDS: ${{ github.event.inputs.shards || '5' }}
+          SHARDS: ${{ github.event.inputs.shards || '4' }}
           FORCE: ${{ github.event.inputs.force || false }}
           ASSUME_NEW_VIP: ${{ github.event.inputs.assume_new_vip || true }}
           DAYS: ${{ github.event.inputs.days || '1' }}

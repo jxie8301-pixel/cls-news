@@ -90,7 +90,7 @@ async function main() {
     process.exit(1);
   }
 
-  const shards = Math.max(1, parseInt(process.env.SHARDS || '5', 10) || 5);
+  const shards = Math.max(1, parseInt(process.env.SHARDS || '4', 10) || 4);
   const force = envBool('FORCE', false);
   const assume = envBool('ASSUME_NEW_VIP', false);
 

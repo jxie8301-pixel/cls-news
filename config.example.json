@@ -1,9 +1,9 @@
 {
   "days": 1,
-  "concurrency": 8,
+  "concurrency": 6,
   "requestDelayMs": 60,
   "scanTimeoutMinutes": 15,
-  "matrixShards": 5,
+  "matrixShards": 4,
   "poolFile": "data/pools/all-a.json",
   "syncPoolsOnStart": false,
   "fetchText": true,
